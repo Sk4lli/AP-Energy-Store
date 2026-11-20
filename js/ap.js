@@ -469,13 +469,22 @@ export class EnergyLinkStore extends EventTarget {
         }
         try {
             const items = await this.client.scout([...locationIds], 0);
+            let foreign = 0;
             for (const item of items) {
                 result.classification[item.locationId] = EnergyLinkStore.classificationOf(item);
                 result.itemName[item.locationId] = item.name;
+                // A trap or McGuffin must belong to this slot. If it does not, the seed was
+                // generated with an older world that spread them over the multiworld.
+                const isStoreItem = item.name === 'Tax Trap' || item.name === 'Inflation Trap'
+                    || item.name === (this.config?.mcguffinItem ?? 'McGuffin');
+                const receiver = item.receiver?.slot ?? item.receiver?.name;
+                if (isStoreItem && receiver !== undefined && receiver !== this.slot) {
+                    foreign += 1;
+                }
             }
             this.scouted = result.classification;
             this.scoutedNames = result.itemName;
-            this.emit('scouted', { ...result, count: items.length });
+            this.emit('scouted', { ...result, count: items.length, foreign });
         } catch (error) {
             this.log('warn', t('log.scout.failed', { error: error.message ?? error }));
         }
