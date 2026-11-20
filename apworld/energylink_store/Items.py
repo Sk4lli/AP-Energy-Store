@@ -11,7 +11,9 @@ BASE_ITEM_ID = 0xE1E57000
 
 MACGUFFIN_ITEM = "McGuffin"
 FILLER_ITEM = "Store Filler"
+# Tax Trap: raises the prices for good
 TAX_TRAP_ITEM = "Tax Trap"
+# Inflation Trap: burns a share of the EnergyLink pool
 INFLATION_TRAP_ITEM = "Inflation Trap"
 
 # name -> classification; the id is BASE_ITEM_ID + index, so it never changes while the list grows.

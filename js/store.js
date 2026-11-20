@@ -15,7 +15,7 @@ export class StoreModel extends EventTarget {
         this.checked = new Set();
         this.page = 1;
         this.pages = [];
-        this.inflationSteps = 0;
+        this.taxSteps = 0;
         // locationId -> item classification, filled by scouting
         this.classification = {};
     }
@@ -37,9 +37,9 @@ export class StoreModel extends EventTarget {
      * Rebuilds pages from the configuration and the location list of the slot.
      * locations: sorted array of location ids.
      */
-    setData({ config, locationIds, checked, inflation = 0, classification = null }) {
+    setData({ config, locationIds, checked, taxSteps = 0, classification = null }) {
         this.config = config;
-        this.inflationSteps = Math.max(0, Number(inflation) || 0);
+        this.taxSteps = Math.max(0, Number(taxSteps) || 0);
         this.classification = classification ?? {};
         this.locationIds = [...locationIds].sort((a, b) => a - b);
         this.checked = new Set(checked ?? []);
@@ -106,25 +106,25 @@ export class StoreModel extends EventTarget {
         return pages;
     }
 
-    /** Price of a page, including the inflation traps received so far. */
+    /** Price of a page, including the tax traps received so far (they stay for the whole run). */
     priceOf(pageNumber) {
         const base = priceFor(this.config ?? { basePrice: 0, priceStep: 0 }, pageNumber);
-        const perTrap = Number(this.config?.inflationPerTrap ?? 0);
-        if (!(perTrap > 0) || !(this.inflationSteps > 0)) {
+        const step = Number(this.config?.taxPerTrap ?? 0);
+        if (!(step > 0) || !(this.taxSteps > 0)) {
             return base;
         }
-        return Math.round(base * (1 + perTrap * this.inflationSteps));
+        return Math.round(base * (1 + step * this.taxSteps));
     }
 
-    /** Rebuilds page prices after a trap arrived. */
-    setInflation(steps) {
+    /** Rebuilds page prices after a tax trap arrived. */
+    setTaxSteps(steps) {
         const next = Math.max(0, Number(steps) || 0);
-        if (next === this.inflationSteps) {
+        if (next === this.taxSteps) {
             return;
         }
-        this.inflationSteps = next;
+        this.taxSteps = next;
         this.pages = this._buildPages();
-        this.emit('change', { reason: 'inflation' });
+        this.emit('change', { reason: 'tax' });
     }
 
     /**

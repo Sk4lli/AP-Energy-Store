@@ -145,7 +145,8 @@ wss.on('connection', (ws) => {
                         price_step: 1000000,
                         mcguffins_required: 6,
                         mcguffin_name: 'McGuffin',
-                        tax_per_trap: 250000,
+                        // fractions: Tax Trap = +10 % price, Inflation Trap = 20 % of the pool burned
+                        tax_per_trap: 0.1,
                         inflation_per_trap: 0.2,
                         trap_percentage: 20,
                         store_version: 1,

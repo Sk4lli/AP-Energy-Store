@@ -80,8 +80,8 @@ Erzeugte Items:
 | ------------------ | ----------- | -------------------------------------------------- |
 | `McGuffin`         | progression | Ziel: `mcguffins_required` Stück sammeln            |
 | `Store Filler`     | filler      | nichts                                             |
-| `Tax Trap`         | trap        | zieht `tax_per_trap` Joule aus dem Pool ab          |
-| `Inflation Trap`   | trap        | erhöht alle Preise um `inflation_per_trap` Prozent  |
+| `Tax Trap`         | trap        | alle Preise steigen dauerhaft um `tax_per_trap` %   |
+| `Inflation Trap`   | trap        | `inflation_per_trap` % des EnergyLink-Speichers brennt |
 
 `McGuffin` und die Traps sind **lokal** zum eigenen Slot (das World setzt sie in `local_items`).
 Sie können nicht im Multiworld verteilt werden, weil ein Trap sonst bei einem Spieler landet, der
@@ -101,8 +101,8 @@ also aus der Player-YAML. Erwartete Schlüssel (alle optional):
 | `energylink_key`                         | EnergyLink-Schlüssel überschreiben   | `EnergyLink{team}` |
 | `mcguffins_required`                     | Ziel-Anzahl McGuffins (Anzeige)      | 0         |
 | `mcguffin_name`                          | Itemname für das Ziel                | `McGuffin` |
-| `tax_per_trap`                           | Joule-Abzug pro Steuer-Trap          | 0         |
-| `inflation_per_trap`                     | Preisaufschlag pro Inflation-Trap    | 0         |
+| `tax_per_trap`                           | Preisaufschlag pro Steuer-Trap (Anteil) | 0      |
+| `inflation_per_trap`                     | verbranntes Pool-Anteil pro Inflation-Trap | 0   |
 
 Aliase: `progressItems`, `locations_per_progress`, `price_base`, `starting_price`, `price_increase` usw.
 Zusätzlich wird ein verschachteltes Objekt `energylink_store`, `store` oder `config` erkannt.
@@ -133,6 +133,14 @@ der Location-Name und der Item-Name stehen im Tooltip. In Race-Seeds verweigert 
 Auskunft, dann steht dort `Unknown`.
 
 ## Kauf-Ablauf
+
+Traps wirken beim Kauf der Location, die sie enthält:
+
+- **Inflation Trap** verbrennt einen Anteil des EnergyLink-Speichers (Standard 20 %). Der Anteil
+  wird über `mul` auf den aktuellen Stand gerechnet, trifft also auch Joule, die inzwischen
+  dazugekommen sind.
+- **Tax Trap** hebt alle Preise dauerhaft um einen Anteil an (Standard 10 % pro Trap). Der
+  Aufschlag bleibt für den Rest des Runs.
 
 Ein Kauf ist eine Transaktion, damit kein Guthaben verloren geht:
 

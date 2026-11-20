@@ -110,9 +110,9 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Counts the items of this slot and applies traps.
-     * A Tax Trap drains joules from the EnergyLink pool, an Inflation Trap raises the prices
-     * of the current page. Both are meant to hurt, so they take effect as soon as they arrive.
+     * Counts the items of this slot and applies traps. Both hurt as soon as they arrive:
+     *   Tax Trap        raises every price for the rest of the run (permanent)
+     *   Inflation Trap  burns a share of the EnergyLink pool
      */
     _onItemsReceived(items, startingIndex) {
         if (startingIndex === 0) {
@@ -133,8 +133,19 @@ export class EnergyLinkStore extends EventTarget {
 
         const taxCount = fresh.filter((name) => name === 'Tax Trap').length;
         if (taxCount > 0) {
-            // Fire and forget: a trap should not block the store, and a failure is only logged.
-            void this._applyTaxTrap(taxCount);
+            // Only the prices change, no storage write needed.
+            this.emit('trap', {
+                kind: 'tax',
+                count: taxCount,
+                percent: Math.round((this.config?.taxPerTrap ?? 0) * 100),
+                factor: this.inflationFactor,
+            });
+        }
+
+        const inflationCount = fresh.filter((name) => name === 'Inflation Trap').length;
+        if (inflationCount > 0) {
+            // Fire and forget: a trap should not block the store, a failure is only logged.
+            void this._applyInflationTrap(inflationCount);
         }
 
         this.emit('items', {
@@ -144,19 +155,33 @@ export class EnergyLinkStore extends EventTarget {
         });
     }
 
-    async _applyTaxTrap(count) {
-        const amount = Math.round((this.config?.taxPerTrap ?? 0) * count);
-        if (!(amount > 0) || !this.isConnected) {
+    /**
+     * Burns a share of the pool. The share is read from the storage reply, so it always hits the
+     * current amount even when another client added joules in the meantime.
+     */
+    async _applyInflationTrap(count) {
+        const share = Number(this.config?.inflationPerTrap ?? 0);
+        if (!(share > 0) || !this.isConnected) {
             return;
         }
+        const key = this.energyKey || `EnergyLink${this.team}`;
+        const percent = Math.min(100, share * 100 * count);
         try {
-            const packet = await this._setStorage(this.energyKey || `EnergyLink${this.team}`, [
-                { operation: 'add', value: -amount },
+            const packet = await this._setStorage(key, [
+                { operation: 'mul', value: Math.max(0, 1 - share * count) },
+                { operation: 'floor', value: null },
                 { operation: 'max', value: 0 },
             ]);
+            const before = Math.round(Number(packet.original_value) || 0);
             const value = Math.round(Number(packet.value) || 0);
             this._setEnergy(value);
-            this.emit('trap', { kind: 'tax', count, amount, energy: value });
+            this.emit('trap', {
+                kind: 'inflation',
+                count,
+                percent: Math.round(percent),
+                burned: before - value,
+                energy: value,
+            });
         } catch (error) {
             this.log('warn', t('log.trap.failed', { error: error.message }));
         }
@@ -166,18 +191,18 @@ export class EnergyLinkStore extends EventTarget {
         return this.received.filter((item) => item === name).length;
     }
 
-    /** Number of inflation traps received so far; the model turns it into prices. */
-    get inflationSteps() {
-        return this.trapEffects?.inflation ?? 0;
+    /** Number of tax traps received so far; the model turns it into prices. */
+    get taxSteps() {
+        return this.trapEffects?.tax ?? 0;
     }
 
-    /** Price multiplier caused by all inflation traps received so far. */
+    /** Price multiplier caused by all tax traps received so far. */
     get inflationFactor() {
-        const base = Number(this.config?.inflationPerTrap ?? 0);
-        if (!(base > 0)) {
+        const step = Number(this.config?.taxPerTrap ?? 0);
+        if (!(step > 0)) {
             return 1;
         }
-        return 1 + this.inflationSteps * base;
+        return 1 + this.taxSteps * step;
     }
 
     /* The game name per server+slot, so a reconnect does not need the TextOnly probe again. */

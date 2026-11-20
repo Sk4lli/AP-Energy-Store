@@ -33,9 +33,9 @@ mit dem Slotnamen aus der YAML.
 | `filler_joules`          | 0         | reiner Anzeigewert eines Filler-Items                            |
 | `trap_percentage`        | 15        | Anteil der Filler-Plätze, die zu Traps werden                    |
 | `tax_trap`               | an        | Steuer-Traps erlauben                                            |
-| `tax_per_trap`           | 250 000   | Joule, die ein Steuer-Trap aus dem Speicher nimmt                |
+| `tax_per_trap`           | 10        | Prozent, die ein Steuer-Trap dauerhaft auf alle Preise legt      |
 | `inflation_trap`         | an        | Inflation-Traps erlauben                                         |
-| `inflation_per_trap`     | 20        | Prozent Aufschlag auf alle Preise pro Inflation-Trap             |
+| `inflation_per_trap`     | 20        | Prozent des EnergyLink-Speichers, die ein Inflation-Trap verbrennt |
 | `team_energylink`        | an        | Team-Schlüssel `EnergyLink<team>` nutzen, denselben wie Factorio  |
 
 Der Preis einer Location ist `base_price + price_step * (Seite - 1)`. Alle Locations einer Seite
@@ -50,8 +50,8 @@ besiegbar ist. Wenn das passiert, steht eine Warnung im Log.
 | ------------------ | ----------- | ----------------------------------------------------------- |
 | `McGuffin`         | progression | `mcguffins_required` Stück sammeln und gewinnen             |
 | `Store Filler`     | filler      | nichts                                                      |
-| `Tax Trap`         | trap        | der Client zieht `tax_per_trap` Joule aus dem Speicher       |
-| `Inflation Trap`   | trap        | der Client erhöht alle Preise um `inflation_per_trap` Prozent |
+| `Tax Trap`         | trap        | alle Preise steigen dauerhaft um `tax_per_trap` Prozent      |
+| `Inflation Trap`   | trap        | `inflation_per_trap` Prozent des Speichers werden verbrannt  |
 
 McGuffins und Traps sind **lokal** zum eigenen Slot: Das World setzt sie in `local_items`, damit sie
 nie in einer anderen Welt landen. Ein Trap muss den Spieler treffen, der die Location gekauft hat,
@@ -80,11 +80,11 @@ Das World schickt alles, was der Client braucht:
   "mcguffins_required": 50,
   "filler_joules": 0,
   "trap_percentage": 15,
-  "tax_per_trap": 250000,
+  "tax_per_trap": 0.1,
   "inflation_per_trap": 0.2,
   "use_team_energylink": true,
   "mcguffin_name": "McGuffin",
-  "store_version": 1
+  "store_version": 2
 }
 ```
 

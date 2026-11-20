@@ -10,13 +10,13 @@
     "test": "node tests/browser.test.mjs",
     "test:edge": "node tests/edge.mjs",
     "test:real": "node tests/e2e-real.mjs",
-    "test:traps": "node tests/e2e-traps.mjs",
     "build:apworld": "sh apworld/build.sh",
     "test:connect": "node tests/cache-stale.mjs",
     "test:file": "node tests/file-protocol.mjs",
     "test:protocol": "node tests/protocol-fallback.mjs",
     "test:pages": "node tests/page-auto.mjs",
-    "test:trapLocal": "node tests/e2e-trap-local.mjs"
+    "test:trapLocal": "node tests/e2e-trap-local.mjs",
+    "test:trapEffects": "node tests/e2e-trap-effects.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.1",

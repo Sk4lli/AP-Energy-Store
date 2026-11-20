@@ -31,7 +31,9 @@ const ALIASES = {
     mcguffins: ['mcguffins_required', 'mcguffin_count', 'goal_items', 'mcguffins'],
     mcguffinItem: ['mcguffin_name', 'mcguffin_item', 'goal_item_name'],
     fillerJoules: ['filler_joules', 'filler_value', 'filler_joule'],
+    // fraction, e.g. 0.1 = every price +10 % per Tax Trap (permanent)
     taxPerTrap: ['tax_per_trap', 'trap_tax', 'tax_amount'],
+    // fraction, e.g. 0.2 = 20 % of the pool burns per Inflation Trap
     inflationPerTrap: ['inflation_per_trap', 'trap_inflation', 'inflation_amount'],
 };
 
@@ -130,13 +132,22 @@ export function parseConfig(slotData, { game, team } = {}) {
 
     const taxPerTrap = pick(source, ALIASES.taxPerTrap);
     if (taxPerTrap !== undefined) {
-        config.taxPerTrap = Math.max(0, Math.round(toFloat(taxPerTrap, 0)));
+        // A whole number (10) is read as percent, a fraction (0.1) as a fraction.
+        let value = Math.max(0, toFloat(taxPerTrap, 0));
+        if (value > 1) {
+            value /= 100;
+        }
+        config.taxPerTrap = value;
     }
 
     const inflationPerTrap = pick(source, ALIASES.inflationPerTrap);
     if (inflationPerTrap !== undefined) {
-        // 0.25 means "25% more expensive per trap"
-        config.inflationPerTrap = Math.max(0, toFloat(inflationPerTrap, 0));
+        let value = Math.max(0, toFloat(inflationPerTrap, 0));
+        if (value > 1) {
+            value /= 100;
+        }
+        // a burn share above 100 % makes no sense
+        config.inflationPerTrap = Math.min(1, value);
     }
 
     const key = pick(source, ALIASES.energyLinkKey);

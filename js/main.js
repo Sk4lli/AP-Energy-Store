@@ -154,7 +154,7 @@ function syncModel({ keepPage = false } = {}) {
         config: store.config,
         locationIds: store.allLocationIds(),
         checked: store.checkedLocationIds(),
-        inflation: store.inflationSteps ?? 0,
+        taxSteps: store.taxSteps ?? 0,
         classification: store.scouted,
     });
     if (!keepPage) {
@@ -369,8 +369,8 @@ function renderLocations() {
             ]),
             el('span', {
                 class: 'location__price',
-                title: model.inflationSteps > 0 ? t('store.price.inflated') : undefined,
-                text: formatEnergy(page.price, model.locale) + (model.inflationSteps > 0 ? ' ↑' : ''),
+                title: model.taxSteps > 0 ? t('store.price.taxed') : undefined,
+                text: formatEnergy(page.price, model.locale) + (model.taxSteps > 0 ? ' ↑' : ''),
             }),
             el('span', { class: `location__state ${state.cls}`.trim(), text: state.text }),
         ]);
@@ -626,16 +626,22 @@ function bindStoreEvents() {
                 }
             }
         }
-        // an inflation trap changes the prices of the open pages
-        model.setInflation(store.inflationSteps);
+        // a tax trap raises the prices of the open pages for good
+        model.setTaxSteps(store.taxSteps);
         render();
     });
     store.addEventListener('trap', (event) => {
         const detail = event.detail ?? {};
         if (detail.kind === 'tax') {
             consoleUi?.write(t('log.trap.tax', {
-                amount: formatEnergy(detail.amount, model.locale),
-                value: formatEnergy(detail.energy, model.locale),
+                percent: detail.percent ?? 0,
+                factor: (detail.factor ?? 1).toFixed(2),
+            }), 'warn');
+        } else if (detail.kind === 'inflation') {
+            consoleUi?.write(t('log.trap.inflation', {
+                percent: detail.percent ?? 0,
+                burned: formatEnergy(detail.burned ?? 0, model.locale),
+                value: formatEnergy(detail.energy ?? 0, model.locale),
             }), 'error');
         }
         render();

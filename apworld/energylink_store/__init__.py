@@ -203,11 +203,13 @@ class EnergylinkStoreWorld(World):
             "mcguffins_required": self.effective_mcguffins,
             "filler_joules": self.options.filler_joules.value,
             "trap_percentage": self.options.trap_percentage.value,
-            "tax_per_trap": self.options.tax_per_trap.value,
+            # Tax Trap: permanent price increase, as a fraction (0.1 = +10 % per trap)
+            "tax_per_trap": self.options.tax_per_trap.value / 100,
+            # Inflation Trap: share of the pool that burns, as a fraction (0.2 = 20 % per trap)
             "inflation_per_trap": self.options.inflation_per_trap.value / 100,
             "use_team_energylink": bool(self.options.team_energylink.value),
             "mcguffin_name": MACGUFFIN_ITEM,
-            "store_version": 1,
+            "store_version": 2,
         }
 
     def write_spoiler(self, spoiler_handle: typing.TextIO) -> None:

@@ -53,7 +53,7 @@ const gotTax = buys.some((x) => x.after.tax > x.before.tax);
 console.log('   traps received by this slot:', await p.evaluate(() => window.energylinkStore.store.trapEffects));
 ck('inflation trap reached the buyer', gotInflation, JSON.stringify(buys.map((x) => x.after.inflation)));
 ck('tax trap reached the buyer', gotTax, JSON.stringify(buys.map((x) => x.after.tax)));
-ck('inflation raised prices', buys.some((x) => x.after.price > x.before.price), JSON.stringify(buys.map((x) => [x.before.price, x.after.price])));
+ck('tax raised prices', buys.some((x) => x.after.price > x.before.price), JSON.stringify(buys.map((x) => [x.before.price, x.after.price])));
 ck('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 await b.close();
 console.log(fail === 0 ? '\nTRAP LOCALITY PASSED' : `\n${fail} FAILED`);

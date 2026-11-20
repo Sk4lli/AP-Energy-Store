@@ -1,16 +1,17 @@
 # Player-YAML Beispiel für den Energylink Store.
 #
-# Die Werte landen als slot_data beim Client. Fehlen sie, nutzt der Store
-# Standardwerte (5 Seiten, 5 Locations je Seite, 1 MJ Basispreis, 1 MJ Aufschlag).
+# Die Optionen gehören unter den Spielnamen "Energylink Store". Fehlen sie,
+# nutzt die World ihre Standardwerte (5 Seiten, 5 Locations je Seite, 1 MJ
+# Basispreis, 1 MJ Aufschlag, 50 McGuffins, 15 % Traps).
 
 name: Tester
-game: Test World
+game: Energylink Store
 
-Test World:
-  # Anzahl der Progress-Seiten im Store
-  progress_items: 5
+Energylink Store:
+  # Anzahl der Store-Seiten (1 bis 20)
+  progress_pages: 5
 
-  # Locations je Progress-Seite (erlaubt: 5 bis 10)
+  # Locations je Seite (5 bis 10)
   locations_per_page: 8
 
   # Preis einer Location auf Seite 1, in Joule
@@ -20,5 +21,17 @@ Test World:
   # Seite 1: 750k, Seite 2: 2,25M, Seite 3: 3,75M, ...
   price_step: 1500000
 
-  # Optional: EnergyLink-Schlüssel überschreiben (Standard: EnergyLink<team>)
-  # energylink_key: EnergyLink0
+  # Wie viele McGuffins zum Sieg nötig sind
+  mcguffins_required: 50
+
+  # Anteil der Filler-Plätze, die zu Traps werden (0 bis 100)
+  trap_percentage: 15
+
+  # Steuer-Trap: hebt alle Preise dauerhaft an, in Prozent pro Trap
+  tax_trap: true
+  tax_per_trap: 10
+
+  # Inflation-Trap: verbrennt einen Teil des EnergyLink-Speichers,
+  # in Prozent des aktuellen Stands pro Trap
+  inflation_trap: true
+  inflation_per_trap: 20

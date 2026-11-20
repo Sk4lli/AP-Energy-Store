@@ -85,35 +85,38 @@ class FillerJoules(Range):
 
 
 class TaxTrap(Toggle):
-    """Enable the "Tax" trap, which takes joules out of the EnergyLink pool."""
+    """Enable the "Tax" trap, which raises the prices of the store for good."""
 
     display_name = "Tax Trap"
     default = 1
 
 
 class TaxPerTrap(Range):
-    """How many joules a single Tax Trap takes out of the EnergyLink pool."""
+    """How much one Tax Trap raises every price, in percent.
 
-    display_name = "Joules per Tax Trap"
+    The increase stays for the rest of the run, so a few of them make the store expensive.
+    """
+
+    display_name = "Tax per Trap (%)"
     range_start = 0
-    range_end = 10_000_000
-    default = 250_000
+    range_end = 100
+    default = 10
 
 
 class InflationPerTrap(Range):
-    """How much one Inflation Trap raises the prices, in percent.
+    """How much of the EnergyLink pool one Inflation Trap burns, in percent.
 
-    Percent instead of a factor so the value stays an integer in the YAML.
+    Percent instead of an absolute value, so the trap keeps hurting when the pool grows.
     """
 
     display_name = "Inflation per Trap (%)"
-    range_start = 0
+    range_start = 1
     range_end = 100
     default = 20
 
 
 class InflationTrap(Toggle):
-    """Enable the "Inflation" trap, which raises the price of the current page."""
+    """Enable the "Inflation" trap, which burns a share of the EnergyLink pool."""
 
     display_name = "Inflation Trap"
     default = 1

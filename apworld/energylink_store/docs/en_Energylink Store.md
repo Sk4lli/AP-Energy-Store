@@ -32,9 +32,9 @@ slot name from the YAML.
 | `filler_joules`             | 0          | informational value of a filler item                            |
 | `trap_percentage`           | 15         | share of the filler slots replaced by traps                     |
 | `tax_trap`                  | on         | allow Tax Traps                                                 |
-| `tax_per_trap`              | 250 000    | joules a Tax Trap removes from the pool                         |
+| `tax_per_trap`              | 10         | percent a Tax Trap adds to every price, permanently             |
 | `inflation_trap`            | on         | allow Inflation Traps                                           |
-| `inflation_per_trap`        | 20         | percent added to every price per Inflation Trap                 |
+| `inflation_per_trap`        | 20         | percent of the EnergyLink pool one Inflation Trap burns         |
 | `team_energylink`           | on         | use the team key `EnergyLink<team>`, the same one Factorio uses |
 
 The price of a location is `base_price + price_step * (page - 1)`. Every location on a page costs the
@@ -49,8 +49,8 @@ beatable. A warning is logged when that happens.
 | ---------------- | ---------- | ----------------------------------------------------------- |
 | `McGuffin`       | progression| collect `mcguffins_required` of them to win                 |
 | `Store Filler`   | filler     | nothing                                                     |
-| `Tax Trap`       | trap       | the client takes `tax_per_trap` joules out of the pool      |
-| `Inflation Trap` | trap       | the client raises all prices by `inflation_per_trap` percent |
+| `Tax Trap`       | trap       | every price rises permanently by `tax_per_trap` percent     |
+| `Inflation Trap` | trap       | `inflation_per_trap` percent of the pool is burned          |
 
 McGuffins and traps are **local** to their slot: the world puts them into `local_items`, so they can
 never land in another player's world. A trap has to hurt the player who bought the location, and the
@@ -79,11 +79,11 @@ The world sends everything the client needs:
   "mcguffins_required": 50,
   "filler_joules": 0,
   "trap_percentage": 15,
-  "tax_per_trap": 250000,
+  "tax_per_trap": 0.1,
   "inflation_per_trap": 0.2,
   "use_team_energylink": true,
   "mcguffin_name": "McGuffin",
-  "store_version": 1
+  "store_version": 2
 }
 ```
 
