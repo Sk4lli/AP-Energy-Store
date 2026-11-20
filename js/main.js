@@ -650,10 +650,6 @@ function bindStoreEvents() {
         const detail = event.detail ?? {};
         model.setClassification(detail.classification ?? {});
         consoleUi?.write(t('log.scouted', { count: detail.count ?? 0 }), 'info');
-        if ((detail.foreign ?? 0) > 0) {
-            // Traps and McGuffins only work in the slot they were bought for.
-            consoleUi?.write(t('log.scout.foreign', { count: detail.foreign }), 'warn');
-        }
         render();
     });
     store.addEventListener('datapackage', (event) => {

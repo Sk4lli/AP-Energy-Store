@@ -110,42 +110,21 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Counts the items of this slot and applies traps. Both hurt as soon as they arrive:
-     *   Tax Trap        raises every price for the rest of the run (permanent)
-     *   Inflation Trap  burns a share of the EnergyLink pool
+     * Counts the items of this slot. Traps are handled in applyTrapFromLocation instead:
+     * their receiver is always this store, but the item travels to whichever slot the
+     * multiworld placed it in, so counting own items would miss most of them.
      */
     _onItemsReceived(items, startingIndex) {
         if (startingIndex === 0) {
             this.received = [];
-            this.trapEffects = { tax: 0, inflation: 0 };
         }
         const fresh = [];
         for (const item of items) {
-            const name = item.name ?? '';
-            this.received.push(name);
-            fresh.push(name);
-            if (name === 'Tax Trap') {
-                this.trapEffects.tax += 1;
-            } else if (name === 'Inflation Trap') {
-                this.trapEffects.inflation += 1;
-            }
-        }
-
-        const taxCount = fresh.filter((name) => name === 'Tax Trap').length;
-        if (taxCount > 0) {
-            // Only the prices change, no storage write needed.
-            this.emit('trap', {
-                kind: 'tax',
-                count: taxCount,
-                percent: Math.round((this.config?.taxPerTrap ?? 0) * 100),
-                factor: this.inflationFactor,
-            });
-        }
-
-        const inflationCount = fresh.filter((name) => name === 'Inflation Trap').length;
-        if (inflationCount > 0) {
-            // Fire and forget: a trap should not block the store, a failure is only logged.
-            void this._applyInflationTrap(inflationCount);
+            // Traps are counted when their location is bought (applyTrapFromLocation), not here.
+            // An item can sit in any slot of the multiworld, so its arrival says nothing about
+            // whether this store's trap was triggered.
+            this.received.push(item.name ?? '');
+            fresh.push(item.name ?? '');
         }
 
         this.emit('items', {
@@ -156,8 +135,36 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Burns a share of the pool. The share is read from the storage reply, so it always hits the
-     * current amount even when another client added joules in the meantime.
+     * Applies the trap that sits in a freshly bought location. The effect always lands on this
+     * store (the world that created the item), no matter which slot the item was placed in.
+     */
+    async applyTrapFromLocation(locationId) {
+        const name = this.scoutedNames?.[locationId];
+        if (!name) {
+            return null;
+        }
+        if (name === 'Tax Trap') {
+            this.trapEffects.tax += 1;
+            const detail = {
+                kind: 'tax',
+                count: 1,
+                percent: Math.round((this.config?.taxPerTrap ?? 0) * 100),
+                factor: this.inflationFactor,
+            };
+            this.emit('trap', detail);
+            return detail;
+        }
+        if (name === 'Inflation Trap') {
+            this.trapEffects.inflation += 1;
+            await this._applyInflationTrap(1);
+            return { kind: 'inflation', count: 1 };
+        }
+        return null;
+    }
+
+    /**
+     * Burns a share of the pool. The share is applied with "mul", so it always hits the current
+     * amount even when another client added joules in the meantime.
      */
     async _applyInflationTrap(count) {
         const share = Number(this.config?.inflationPerTrap ?? 0);
@@ -469,22 +476,13 @@ export class EnergyLinkStore extends EventTarget {
         }
         try {
             const items = await this.client.scout([...locationIds], 0);
-            let foreign = 0;
             for (const item of items) {
                 result.classification[item.locationId] = EnergyLinkStore.classificationOf(item);
                 result.itemName[item.locationId] = item.name;
-                // A trap or McGuffin must belong to this slot. If it does not, the seed was
-                // generated with an older world that spread them over the multiworld.
-                const isStoreItem = item.name === 'Tax Trap' || item.name === 'Inflation Trap'
-                    || item.name === (this.config?.mcguffinItem ?? 'McGuffin');
-                const receiver = item.receiver?.slot ?? item.receiver?.name;
-                if (isStoreItem && receiver !== undefined && receiver !== this.slot) {
-                    foreign += 1;
-                }
             }
             this.scouted = result.classification;
             this.scoutedNames = result.itemName;
-            this.emit('scouted', { ...result, count: items.length, foreign });
+            this.emit('scouted', { ...result, count: items.length });
         } catch (error) {
             this.log('warn', t('log.scout.failed', { error: error.message ?? error }));
         }
@@ -598,9 +596,12 @@ export class EnergyLinkStore extends EventTarget {
                 return { ok: false, reason: 'race', energy: before, charged };
             }
 
+            // Read the trap before checking: the scout data is there as soon as the page is shown.
+            const trap = await this.applyTrapFromLocation(locationId);
+
             this.client.check(locationId);
             this.emit('locations', { checked: [locationId] });
-            return { ok: true, energy: after, location: locationId, price, charged };
+            return { ok: true, energy: after, location: locationId, price, charged, trap };
         } catch (error) {
             if (charged > 0) {
                 try {

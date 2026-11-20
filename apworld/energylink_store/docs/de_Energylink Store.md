@@ -53,10 +53,14 @@ besiegbar ist. Wenn das passiert, steht eine Warnung im Log.
 | `Tax Trap`         | trap        | alle Preise steigen dauerhaft um `tax_per_trap` Prozent      |
 | `Inflation Trap`   | trap        | `inflation_per_trap` Prozent des Speichers werden verbrannt  |
 
-McGuffins und Traps sind **lokal** zum eigenen Slot: Das World setzt sie in `local_items`, damit sie
-nie in einer anderen Welt landen. Der Client prüft das beim Verbinden per Scouting und warnt, wenn
-ein Seed noch Traps bei einem anderen Slot hat (dann wurde der Raum mit einer älteren World
-generiert und muss neu erzeugt werden). Ein Trap muss den Spieler treffen, der die Location gekauft hat,
+Traps und McGuffins werden **ganz normal** von Archipelago platziert, sie können also überall im
+Multiworld liegen. Das ist Absicht: Ein Trap gehört seiner Wirkung nach immer der Store-World, die
+ihn erzeugt hat, egal in welcher Location er liegt.
+
+Der Client setzt die Wirkung deshalb beim **Kauf** der Location um, nicht beim Eintreffen des Items.
+Er liest beim Verbinden per Scouting, was in den Locations liegt, und wendet den Trap an, sobald du
+die Location kaufst. So wirkt auch ein Trap, dessen Item in einer fremden Welt liegt (etwa in einer
+Pokemon-Red-Location). Ein Trap muss den Spieler treffen, der die Location gekauft hat,
 und das Ziel zählt McGuffins in diesem Slot. Der Client liest die Traps aus den Items, die er
 empfängt; ein Trap wirkt also in dem Moment, in dem die Location gekauft wird, die ihn enthält.
 

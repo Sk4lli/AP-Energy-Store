@@ -118,4 +118,3 @@ store.kind.unknown=Unbekannt
 store.auto.page=Erste offene Seite gewählt: Seite {page}
 log.scout.failed=Inhalte der Locations konnten nicht abgefragt werden: {error}
 log.scouted={count} Locations abgefragt, Kategorien geladen.
-log.scout.foreign=Achtung: {count} Traps oder McGuffins gehören einem anderen Slot. Der Raum wurde mit einer älteren World generiert, bitte neu generieren, sonst wirken diese Traps nicht.

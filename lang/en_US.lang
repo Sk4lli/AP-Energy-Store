@@ -118,4 +118,3 @@ store.kind.unknown=Unknown
 store.auto.page=Selected the first open page: page {page}
 log.scout.failed=Could not look up the location contents: {error}
 log.scouted=Looked up {count} locations, categories loaded.
-log.scout.foreign=Warning: {count} traps or McGuffins belong to another slot. This room was generated with an older world, please regenerate, otherwise those traps do nothing.

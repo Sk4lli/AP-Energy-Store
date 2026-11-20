@@ -38,18 +38,20 @@ const checked = new Set();
 const items = [];
 
 // Deterministic item/classification per location so the tests can rely on it.
+// Fixed layout per page of five: filler, Inflation Trap, Tax Trap, McGuffin, filler.
+// Location 1 of a page is always a plain filler, so a single buy does not trigger a trap.
 function itemForLocation(id) {
-    const index = id - LOCATION_BASE;
-    if (index % 5 === 0) return 500;      // McGuffin, progression
-    if (index % 5 === 2) return 502;      // Tax Trap
-    if (index % 5 === 3) return 501;      // Store Filler
-    return 501;
+    const index = (id - LOCATION_BASE) % 5;
+    if (index === 1) return 503;          // Inflation Trap
+    if (index === 2) return 502;          // Tax Trap
+    if (index === 3) return 500;          // McGuffin
+    return 501;                           // Store Filler
 }
 
 function flagsForLocation(id) {
-    const index = id - LOCATION_BASE;
-    if (index % 5 === 0) return 1;        // progression
-    if (index % 5 === 2) return 4;        // trap
+    const index = (id - LOCATION_BASE) % 5;
+    if (index === 3) return 1;            // progression (McGuffin)
+    if (index === 1 || index === 2) return 4;   // trap
     return 0;                             // filler
 }
 const log = [];
@@ -196,6 +198,9 @@ wss.on('connection', (ws) => {
                 for (const op of packet.operations ?? []) {
                     switch (op.operation) {
                         case 'add': value += op.value; break;
+                        case 'mul': value *= op.value; break;
+                        case 'pow': value **= op.value; break;
+                        case 'mod': value %= op.value; break;
                         case 'max': value = Math.max(value, op.value); break;
                         case 'min': value = Math.min(value, op.value); break;
                         case 'replace': value = op.value; break;

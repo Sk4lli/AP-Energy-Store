@@ -15,8 +15,7 @@
     "test:file": "node tests/file-protocol.mjs",
     "test:protocol": "node tests/protocol-fallback.mjs",
     "test:pages": "node tests/page-auto.mjs",
-    "test:trapLocal": "node tests/e2e-trap-local.mjs",
-    "test:trapEffects": "node tests/e2e-trap-effects.mjs"
+    "test:trapOnBuy": "node tests/trap-on-buy.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.1",
