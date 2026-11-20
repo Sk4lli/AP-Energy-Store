@@ -56,9 +56,15 @@ Traps and McGuffins are placed by Archipelago like any other item, so they can e
 the multiworld. That is intentional: a trap always belongs to the store world that created it, no
 matter which location it sits in.
 
-The client therefore applies the effect when the **location is bought**, not when the item arrives.
-It scouts the locations on connect and fires the trap as soon as you buy one, so a trap works even
-when its item lies in another world (a Pokemon Red location, for example). A trap has to hurt the player who bought the location, and the
+The client applies the effect in both cases:
+
+1. **You buy the location in the store.** The client scouts it and fires the trap immediately.
+2. **Another player buys it in their world.** The item is sent to this store world, and the client
+   fires the trap when it arrives.
+
+The location id prevents double counting: a trap that is both bought and received takes effect
+exactly once. Traps that already fired are remembered in `localStorage`, so reloading the page
+neither burns the pool again nor forgets the tax increase. A trap has to hurt the player who bought the location, and the
 goal counts McGuffins in this slot. The client reads the traps from the items it receives, so a trap
 takes effect as soon as the location containing it is bought.
 

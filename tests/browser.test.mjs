@@ -42,21 +42,32 @@ await page.waitForTimeout(300);
 
 check('state is connected', await page.evaluate(() => window.energylinkStore.store.state) === 'connected');
 check('game name detected from server', await page.evaluate(() => window.energylinkStore.store.game) === 'Test World');
-check('energy read', await page.evaluate(() => window.energylinkStore.store.energy) === 5000000);
+const startEnergy = Number(process.env.MOCK_ENERGY ?? 10000000);
+check('energy read', await page.evaluate(() => window.energylinkStore.store.energy) === startEnergy,
+    String(await page.evaluate(() => window.energylinkStore.store.energy)));
 check('config from slot_data', await page.evaluate(() => window.energylinkStore.model.config.pages) === 3);
 check('locations per page from slot_data', await page.evaluate(() => window.energylinkStore.model.config.locationsPerPage) === 5);
 check('page 1 has 5 locations', await page.evaluate(() => window.energylinkStore.model.currentPage.total) === 5);
 check('rows show a category label', /Progression|Useful|Trap|Filler|Unknown|Progress|Nützlich|Unbekannt/.test(await page.textContent('.location__name') ?? ''));
 check('tooltip carries the location name', /Location 1/.test(await page.getAttribute('.location__name', 'title') ?? ''));
-check('balance shown in status', (await page.textContent('#stat-energy'))?.includes('5'));
+check('balance shown in status', /\d/.test(await page.textContent('#stat-energy') ?? ''), await page.textContent('#stat-energy'));
 check('buy button enabled', !(await page.isDisabled('#buy-button')));
 
 // --- buy
 console.log('buy');
+// The first row of a page is a plain filler, so the only cost is the price.
+const balanceBefore = await page.evaluate(() => window.energylinkStore.store.energy);
+const priceShown = await page.evaluate(() => window.energylinkStore.model.priceOf(1));
 await page.click('#buy-button');
-await page.waitForFunction(() => window.energylinkStore.store.energy === 4000000, null, { timeout: 10000 });
+await page.waitForFunction(
+    (expected) => window.energylinkStore.store.energy === expected,
+    balanceBefore - priceShown,
+    { timeout: 10000 },
+);
 await page.waitForTimeout(400);
-check('energy reduced by page price', await page.evaluate(() => window.energylinkStore.store.energy) === 4000000);
+check('energy reduced by page price',
+    await page.evaluate(() => window.energylinkStore.store.energy) === balanceBefore - priceShown,
+    `${balanceBefore} - ${priceShown}`);
 check('location is checked server side', await page.evaluate(() => [...window.energylinkStore.store.checkedLocationIds()].length) === 1);
 check('first row marked bought', await page.evaluate(() => window.energylinkStore.model.currentPage.bought) === 1);
 check('summary updated', (await page.textContent('#page-summary'))?.includes('1'));

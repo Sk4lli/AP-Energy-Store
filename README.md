@@ -84,9 +84,14 @@ Erzeugte Items:
 | `Inflation Trap`   | trap        | `inflation_per_trap` % des EnergyLink-Speichers brennt |
 
 Traps und McGuffins werden von Archipelago **ganz normal platziert**, sie können also überall im
-Multiworld liegen. Ein Trap gehört aber immer der Store-World, die ihn erzeugt hat: Der Client setzt
-die Wirkung beim Kauf der Location um, nicht beim Eintreffen des Items. Dadurch wirkt auch ein Trap,
-dessen Item in einer fremden Welt liegt (z.B. eine Pokemon-Red-Location).
+Multiworld liegen. Ein Trap gehört aber immer der Store-World, die ihn erzeugt hat. Der Client löst
+ihn in beiden Fällen aus:
+
+- du kaufst die Location im Store, oder
+- ein anderer Spieler kauft sie in seiner Welt und das Item kommt bei dir an.
+
+Die Location-ID verhindert Doppelzählung. Bereits gewirkte Traps liegen in `localStorage`, ein
+Neuladen der Seite verbrennt den Speicher also nicht erneut und vergisst den Steuer-Aufschlag nicht.
 
 ## Store-Konfiguration (slot_data)
 
@@ -229,6 +234,8 @@ Zusätzlich gegen einen echten Archipelago-Server mit der World:
 ```bash
 npm run test:real       # braucht einen laufenden AP-Server mit der World
 npm run test:trapOnBuy  # Trap wirkt beim Kauf (Mock-Server genügt)
+npm run test:all        # alle Mock-Suiten, jede gegen einen frischen Mock-Server
+npm run test:trapBothWays  # Trap beim eigenen Kauf und beim Eintreffen aus einer fremden Welt
 ```
 
 Getestet wurde mit Archipelago 0.6.8: Generierung der World, slot_data, Locationnamen, Kauf,

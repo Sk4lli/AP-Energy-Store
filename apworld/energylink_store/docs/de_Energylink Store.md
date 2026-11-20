@@ -57,10 +57,16 @@ Traps und McGuffins werden **ganz normal** von Archipelago platziert, sie könne
 Multiworld liegen. Das ist Absicht: Ein Trap gehört seiner Wirkung nach immer der Store-World, die
 ihn erzeugt hat, egal in welcher Location er liegt.
 
-Der Client setzt die Wirkung deshalb beim **Kauf** der Location um, nicht beim Eintreffen des Items.
-Er liest beim Verbinden per Scouting, was in den Locations liegt, und wendet den Trap an, sobald du
-die Location kaufst. So wirkt auch ein Trap, dessen Item in einer fremden Welt liegt (etwa in einer
-Pokemon-Red-Location). Ein Trap muss den Spieler treffen, der die Location gekauft hat,
+Der Client wendet die Wirkung in beiden Fällen an:
+
+1. **Du kaufst die Location im Store.** Der Client liest die Location per Scouting und löst den Trap
+   sofort aus.
+2. **Ein anderer Spieler kauft die Location in seiner Welt.** Das Item wird an diese Store-World
+   geschickt, und der Client löst den Trap beim Eintreffen aus.
+
+Die Location-ID verhindert dabei Doppelzählung: Ein Trap, der sowohl gekauft als auch empfangen wird,
+wirkt genau einmal. Bereits gewirkte Traps werden in `localStorage` gemerkt, damit ein Neuladen der
+Seite weder den Speicher erneut verbrennt noch den Steuer-Aufschlag vergisst. Ein Trap muss den Spieler treffen, der die Location gekauft hat,
 und das Ziel zählt McGuffins in diesem Slot. Der Client liest die Traps aus den Items, die er
 empfängt; ein Trap wirkt also in dem Moment, in dem die Location gekauft wird, die ihn enthält.
 

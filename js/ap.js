@@ -18,6 +18,11 @@ export const CONNECTION_STATE = {
     connected: 'connected',
 };
 
+/** True for the two trap items of this world. */
+function isTrapItem(name) {
+    return name === 'Tax Trap' || name === 'Inflation Trap';
+}
+
 /** A refused login (bad slot, password, game) means the socket worked. */
 function isServerRefusal(error) {
     return Array.isArray(error?.errors) && error.errors.length > 0;
@@ -56,6 +61,9 @@ export class EnergyLinkStore extends EventTarget {
         // locationId -> 'progression' | 'useful' | 'trap' | 'filler', filled by scouting
         this.scouted = {};
         this.scoutedNames = {};
+        // locationId -> true once its trap was applied. A trap can arrive twice (bought here and
+        // placed elsewhere), the location id is what keeps it from counting double.
+        this.trapFired = new Map();
         this._bind();
     }
 
@@ -101,7 +109,9 @@ export class EnergyLinkStore extends EventTarget {
             this.log('chat', text);
         });
         this.client.items.on('itemsReceived', (items, startingIndex) => {
-            this._onItemsReceived(items, startingIndex);
+            // startingIndex 0 means "here is everything you ever got", which happens on connect:
+            // those traps were applied in an earlier session and must not fire again.
+            this._onItemsReceived(items, startingIndex, startingIndex === 0);
         });
     }
 
@@ -110,21 +120,32 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Counts the items of this slot. Traps are handled in applyTrapFromLocation instead:
-     * their receiver is always this store, but the item travels to whichever slot the
-     * multiworld placed it in, so counting own items would miss most of them.
+     * Counts the items of this slot and fires traps that arrive from other worlds.
+     *
+     * A reconnect replays every item with startingIndex 0. Those are already applied, so the
+     * replay only restores the counters. The location-id map in applyTrapFromLocation would
+     * catch it too, but it is per session and the replay must not burn the pool again.
      */
-    _onItemsReceived(items, startingIndex) {
+    _onItemsReceived(items, startingIndex, replay = false) {
         if (startingIndex === 0) {
             this.received = [];
         }
         const fresh = [];
         for (const item of items) {
-            // Traps are counted when their location is bought (applyTrapFromLocation), not here.
-            // An item can sit in any slot of the multiworld, so its arrival says nothing about
-            // whether this store's trap was triggered.
-            this.received.push(item.name ?? '');
-            fresh.push(item.name ?? '');
+            const name = item.name ?? '';
+            this.received.push(name);
+            fresh.push(name);
+        }
+
+        // A trap can be placed in another player's world. Buying that location sends the item
+        // here, and that is the moment it has to take effect. On a replay they already fired.
+        const incoming = items.filter((item) => isTrapItem(item.name ?? ''));
+        if (incoming.length > 0) {
+            if (replay) {
+                this._restoreTrapCounters(incoming);
+            } else {
+                void this._applyIncomingTraps(incoming);
+            }
         }
 
         this.emit('items', {
@@ -134,15 +155,59 @@ export class EnergyLinkStore extends EventTarget {
         });
     }
 
+    /** Counters for traps that were already applied before (reconnect replay). */
+    _restoreTrapCounters(items) {
+        for (const item of items) {
+            const locationId = item.locationId ?? item.location ?? null;
+            if (locationId !== null) {
+                this.trapFired.set(locationId, item.name === 'Tax Trap' ? 'tax' : 'inflation');
+            }
+        }
+        this._syncTrapCounters();
+        this._saveTrapState();
+    }
+
+    /** Traps that arrived from other worlds, deduplicated by their location id. */
+    async _applyIncomingTraps(items) {
+        for (const item of items) {
+            const locationId = item.locationId ?? item.location ?? null;
+            if (locationId === null) {
+                continue;
+            }
+            // The effect is decided by the item that really arrived, not by our scout data:
+            // in another player's world the same location holds a different item.
+            const name = item.name ?? '';
+            this.scoutedNames = this.scoutedNames ?? {};
+            this.scoutedNames[locationId] = name;
+            await this.applyTrapFromLocation(locationId);
+        }
+        this.emit('items', {
+            mcguffins: this.countItem(this.config?.mcguffinItem ?? 'McGuffin'),
+            traps: { ...this.trapEffects },
+            last: [],
+        });
+    }
+
     /**
-     * Applies the trap that sits in a freshly bought location. The effect always lands on this
-     * store (the world that created the item), no matter which slot the item was placed in.
+     * Applies the trap that sits in a location and returns what happened, or null.
+     *
+     * There are two ways a trap of this store reaches the player:
+     *   1. you buy the location in this store  -> buyLocation calls this
+     *   2. another player buys it in their world and the item is sent here -> item event
+     * Both go through this method, and the location id makes sure the effect happens only once,
+     * because the item and the purchase describe the same location.
      */
     async applyTrapFromLocation(locationId) {
         const name = this.scoutedNames?.[locationId];
-        if (!name) {
+        if (!name || !isTrapItem(name)) {
             return null;
         }
+        const already = this.trapFired.get(locationId);
+        if (already) {
+            return { kind: already, count: 0, duplicate: true };
+        }
+        this.trapFired.set(locationId, name === 'Tax Trap' ? 'tax' : 'inflation');
+        this._saveTrapState();
         if (name === 'Tax Trap') {
             this.trapEffects.tax += 1;
             const detail = {
@@ -210,6 +275,46 @@ export class EnergyLinkStore extends EventTarget {
             return 1;
         }
         return 1 + this.taxSteps * step;
+    }
+
+    /**
+     * Traps that already took effect, per server and slot. The server does not resend items on a
+     * reconnect, so without this every reload would forget the tax factor and could burn the pool
+     * a second time for a trap that was already applied.
+     */
+    _trapStorageKey() {
+        return `ap-store.traps.${this.url}.${this.slotName}`;
+    }
+
+    _loadTrapState() {
+        try {
+            const raw = localStorage.getItem(this._trapStorageKey());
+            if (!raw) {
+                return;
+            }
+            const data = JSON.parse(raw);
+            for (const [locationId, kind] of Object.entries(data.fired ?? {})) {
+                this.trapFired.set(Number(locationId), kind);
+            }
+        } catch {
+            // a broken entry only means a trap could fire twice, not worth failing over
+        }
+    }
+
+    _saveTrapState() {
+        try {
+            localStorage.setItem(this._trapStorageKey(), JSON.stringify({
+                fired: Object.fromEntries(this.trapFired),
+            }));
+        } catch {
+            // storage may be blocked; the run still works, a reload just forgets the traps
+        }
+    }
+
+    _syncTrapCounters() {
+        const kinds = [...this.trapFired.values()];
+        this.trapEffects.tax = kinds.filter((k) => k === 'tax').length;
+        this.trapEffects.inflation = kinds.filter((k) => k === 'inflation').length;
     }
 
     /* The game name per server+slot, so a reconnect does not need the TextOnly probe again. */
@@ -381,6 +486,9 @@ export class EnergyLinkStore extends EventTarget {
 
         this.game = this.client.game || game;
         this.slot = this.client.players.self.slot;
+        this.trapFired = new Map();
+        this._loadTrapState();
+        this._syncTrapCounters();
         this.team = this.client.players.self.team ?? 0;
         this.state = CONNECTION_STATE.connected;
 

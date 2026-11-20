@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "serve": "python3 -m http.server 3000",
-    "mock": "node tests/mock-server.mjs --port 38281 --slot Tester --game \"Test World\" --energy 5000000 --pages 3 --perpage 5",
+    "mock": "node tests/mock-server.mjs --port 38281 --slot Tester --game \"Test World\" --energy 10000000 --pages 3 --perpage 5",
     "test": "node tests/browser.test.mjs",
     "test:edge": "node tests/edge.mjs",
     "test:real": "node tests/e2e-real.mjs",
@@ -15,7 +15,9 @@
     "test:file": "node tests/file-protocol.mjs",
     "test:protocol": "node tests/protocol-fallback.mjs",
     "test:pages": "node tests/page-auto.mjs",
-    "test:trapOnBuy": "node tests/trap-on-buy.mjs"
+    "test:trapOnBuy": "node tests/trap-on-buy.mjs",
+    "test:all": "sh tests/run-all.sh",
+    "test:trapBothWays": "node tests/trap-both-ways.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.1",

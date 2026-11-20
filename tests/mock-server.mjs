@@ -27,6 +27,9 @@ const ENERGY = Number(opt('energy', 5000000));
 const PAGES = Number(opt('pages', 3));
 const PER_PAGE = Number(opt('perpage', 5));
 const FAIL_CHECKS = Boolean(opt('fail-checks', false));
+// Mit --push-traps <n> landen Traps dieses Slots bei Slot n (Multiworld-Fall: ein anderer
+// Spieler kauft die Location, das Item kommt bei uns an).
+const PUSH_TRAPS_TO = Number(opt('push-traps', 0)) || 0;
 const NO_SLOT_DATA = Boolean(opt('no-slot-data', false));
 const LOCATION_BASE = 1000;
 
@@ -239,10 +242,14 @@ wss.on('connection', (ws) => {
                 }
                 logLine('checked', newIds.join(','));
                 if (newIds.length > 0) {
-                    // Every location gives an item, like the world does. Alternate traps and McGuffins.
+                    // The item comes from the same table the scout answers use.
                     for (const id of newIds) {
-                        const itemId = id % 3 === 0 ? 502 : 500;
-                        items.push({ item: itemId, location: id, player: 1, flags: itemId === 502 ? 4 : 1 });
+                        items.push({
+                            item: itemForLocation(id),
+                            location: id,
+                            player: 1,
+                            flags: flagsForLocation(id),
+                        });
                     }
                     send([{ cmd: 'ReceivedItems', index: items.length - newIds.length, items: items.slice(-newIds.length) }]);
                     send([{ cmd: 'RoomUpdate', checked_locations: newIds }]);
@@ -264,6 +271,20 @@ wss.on('connection', (ws) => {
                         flags: flagsForLocation(id),
                     }));
                 send([{ cmd: 'LocationInfo', locations }]);
+                return;
+            }
+            case 'DebugPushTrap': {
+                // Test hook: deliver a trap item as if another player had bought that location.
+                const id = Number(packet.location);
+                const entry = {
+                    item: itemForLocation(id),
+                    location: id,
+                    player: PUSH_TRAPS_TO || 2,
+                    flags: 4,
+                };
+                items.push(entry);
+                logLine(`pushed trap for location ${id} (from slot ${entry.player})`);
+                send([{ cmd: 'ReceivedItems', index: items.length - 1, items: [entry] }]);
                 return;
             }
             case 'Say': {
