@@ -83,6 +83,10 @@ Erzeugte Items:
 | `Tax Trap`         | trap        | zieht `tax_per_trap` Joule aus dem Pool ab          |
 | `Inflation Trap`   | trap        | erhöht alle Preise um `inflation_per_trap` Prozent  |
 
+`McGuffin` und die Traps sind **lokal** zum eigenen Slot (das World setzt sie in `local_items`).
+Sie können nicht im Multiworld verteilt werden, weil ein Trap sonst bei einem Spieler landet, der
+gar keinen Store hat, und ein McGuffin für niemanden zählt.
+
 ## Store-Konfiguration (slot_data)
 
 Die Anzahl der Progress-Seiten und Locations pro Seite kommen aus den `slot_data` des Slots,
@@ -214,8 +218,9 @@ Konsolenbefehle, Wettlauf beim Kauf (nichts abgebucht), Trennen.
 Zusätzlich gegen einen echten Archipelago-Server mit der World:
 
 ```bash
-npm run test:real    # braucht einen laufenden AP-Server mit der World
-npm run test:traps   # Trap-Wirkung, braucht ein Trap-lastiges Seed
+npm run test:real       # braucht einen laufenden AP-Server mit der World
+npm run test:traps      # Trap-Wirkung (Steuer, Inflation), braucht ein Trap-lastiges Seed
+npm run test:trapLocal  # Traps bleiben beim Käufer, auch im Multiworld
 ```
 
 Getestet wurde mit Archipelago 0.6.8: Generierung der World, slot_data, Locationnamen, Kauf,

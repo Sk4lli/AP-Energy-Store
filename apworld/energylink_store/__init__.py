@@ -130,6 +130,7 @@ class EnergylinkStoreWorld(World):
         self.multiworld.regions.append(victory)
 
     def create_items(self) -> None:
+        self._force_local()
         total = len(self.multiworld.get_unfilled_locations(self.player))
         required = max(1, min(self.effective_mcguffins, total))
 
@@ -145,6 +146,26 @@ class EnergylinkStoreWorld(World):
         while len(pool) < total:
             pool.append(self._item(FILLER_ITEM))
         self.multiworld.itempool.extend(pool[:total])
+
+    def _force_local(self) -> None:
+        """Keep McGuffins and traps in this slot.
+
+        A trap only hurts the player who receives it, and the goal counts McGuffins in this slot.
+        Without this they would be spread over the multiworld, where a trap lands on a player who
+        has no store and a McGuffin counts for nobody.
+
+        Overrides local_items instead of adding to it: the YAML would otherwise let a player move
+        these items away, which silently breaks the goal and the traps.
+        """
+        keep = {MACGUFFIN_ITEM, TAX_TRAP_ITEM, INFLATION_TRAP_ITEM}
+        existing = set(self.options.local_items.value)
+        removed = existing & keep
+        if removed:
+            logging.warning(
+                "Energylink Store (player %s): %s must stay local, ignoring them in local_items.",
+                self.player, ", ".join(sorted(removed)),
+            )
+        self.options.local_items.value = existing | keep
 
     def _traps_enabled(self) -> bool:
         return bool(self.options.tax_trap.value or self.options.inflation_trap.value)

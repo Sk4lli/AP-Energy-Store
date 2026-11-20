@@ -52,8 +52,10 @@ beatable. A warning is logged when that happens.
 | `Tax Trap`       | trap       | the client takes `tax_per_trap` joules out of the pool      |
 | `Inflation Trap` | trap       | the client raises all prices by `inflation_per_trap` percent |
 
-The client reads the traps from the items it receives, so a trap hurts as soon as the location that
-contains it is bought.
+McGuffins and traps are **local** to their slot: the world puts them into `local_items`, so they can
+never land in another player's world. A trap has to hurt the player who bought the location, and the
+goal counts McGuffins in this slot. The client reads the traps from the items it receives, so a trap
+takes effect as soon as the location containing it is bought.
 
 ## Locations
 

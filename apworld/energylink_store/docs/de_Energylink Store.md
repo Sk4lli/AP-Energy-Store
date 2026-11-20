@@ -53,8 +53,10 @@ besiegbar ist. Wenn das passiert, steht eine Warnung im Log.
 | `Tax Trap`         | trap        | der Client zieht `tax_per_trap` Joule aus dem Speicher       |
 | `Inflation Trap`   | trap        | der Client erhöht alle Preise um `inflation_per_trap` Prozent |
 
-Der Client liest die Traps aus den Items, die er empfängt. Ein Trap wirkt also in dem Moment, in dem
-die Location gekauft wird, die ihn enthält.
+McGuffins und Traps sind **lokal** zum eigenen Slot: Das World setzt sie in `local_items`, damit sie
+nie in einer anderen Welt landen. Ein Trap muss den Spieler treffen, der die Location gekauft hat,
+und das Ziel zählt McGuffins in diesem Slot. Der Client liest die Traps aus den Items, die er
+empfängt; ein Trap wirkt also in dem Moment, in dem die Location gekauft wird, die ihn enthält.
 
 ## Locations
 
