@@ -1,0 +1,120 @@
+# Archipelago Energylink Store - Deutsch (de_DE)
+# Format: key=value   # Kommentar
+
+app.title=Energylink Store
+app.subtitle=Item-Store auf Basis des EnergyLink-Systems
+
+connect.title=Mit Archipelago verbinden
+connect.server=Server (url:port)
+connect.server.placeholder=archipelago.gg:38281
+connect.slot=Slotname
+connect.slot.placeholder=Dein Slotname
+connect.password=Passwort (optional)
+connect.password.placeholder=Leer lassen, wenn kein Passwort gesetzt ist
+connect.button=Verbinden
+connect.disconnect=Trennen
+connect.connecting=Verbinde ...
+connect.connected=Verbunden als {slot} ({game})
+connect.failed=Verbindung fehlgeschlagen
+connect.refused=Server hat die Verbindung abgelehnt: {errors}
+connect.lost=Verbindung zum Server verloren
+connect.need.server=Bitte eine Serveradresse angeben.
+connect.need.slot=Bitte einen Slotnamen angeben.
+connect.already=Es besteht bereits eine Verbindung.
+
+status.title=Status
+status.connection=Verbindung
+status.disconnected=Getrennt
+status.energy=EnergyLink
+status.seed=Seed
+status.slot=Slot
+status.game=Spiel
+status.team=Team
+status.progress=Fortschritt
+status.unknown=-
+
+store.title=Store
+store.balance=Guthaben
+store.page=Seite {current} / {total}
+store.page.short=Seite {current}
+store.prev=Vorherige Seite
+store.next=Nächste Seite
+store.buy=Kaufen
+store.bought=Gekauft
+store.owned=Im Besitz
+store.too.expensive=Zu wenig Joule
+store.need.previous=Erst Seite {page} abschliessen
+store.locations.empty=Keine Locations konfiguriert.
+store.summary=Seite {current}: {bought} / {total} gekauft
+store.all.done=Alle Progress-Seiten abgeschlossen.
+store.not.connected=Keine Verbindung - Store ist schreibgeschuetzt.
+store.purchase.ok=Kauf erfolgreich: {location} für {price}
+store.purchase.failed=Kauf fehlgeschlagen: {reason}
+store.purchase.busy=Es läuft bereits ein Kauf.
+store.no.config=Keine Store-Konfiguration gefunden. slot_data des Slots enthält keine Store-Daten.
+
+console.title=Konsole
+console.placeholder=Befehl eingeben (help für Hilfe)
+console.send=Senden
+console.clear=Leeren
+console.welcome=Energylink Store Konsole bereit. "help" zeigt alle Befehle.
+console.unknown=Unbekannter Befehl: {cmd}. "help" zeigt alle Befehle.
+console.help=Verfügbare Befehle:\n  help                 Diese Hilfe\n  connect <server> <slot> [passwort]  Verbinden\n  disconnect           Verbindung trennen\n  status               Verbindungs- und Store-Status\n  balance              Aktuelles Joule-Guthaben\n  page <n>             Zu Seite n wechseln\n  pages                Alle Seiten mit Kaufstand\n  buy <n>              Location n auf der aktuellen Seite kaufen\n  locations            Locations der aktuellen Seite\n  lang <code>          Sprache wechseln (de_DE, en_US)\n  refresh              EnergyLink neu abfragen\n  clear                Konsole leeren
+console.need.connection=Für diesen Befehl wird eine Verbindung benötigt.
+console.bad.args=Ungültige Argumente. Siehe "help".
+console.lang.unknown=Unbekannte Sprache: {code}. Verfügbar: {list}
+console.lang.changed=Sprache geändert auf {code}.
+
+log.connected=Verbunden mit {url} als Slot "{slot}" (Spiel: {game}).
+log.disconnected=Verbindung getrennt.
+log.login.failed=Login fehlgeschlagen: {error}
+log.energylink=EnergyLink: {value} im gemeinsamen Speicher.
+log.energylink.change=EnergyLink geändert: {old} -> {value}
+log.energylink.unavailable=EnergyLink-Schlüssel konnte nicht gelesen werden: {error}
+log.config.loaded=Konfiguration geladen: {pages} Progress-Seiten, {perPage} Locations pro Seite.
+log.datapackage=DataPackage geladen: {games}
+log.buy.start=Kauf gestartet: {location} auf Seite {page} für {price}
+log.buy.energylink=EnergyLink abgebucht: {amount}, neuer Stand {value}
+log.buy.done=Kauf abgeschlossen: {location}
+log.buy.error=Kauf abgebrochen: {error}
+log.chat=Chat: {text}
+
+btn.language=Sprache
+
+error.no.store=Bitte zuerst verbinden.
+
+status.connected=Verbunden
+store.locked=Gesperrt
+store.race=Preis hat sich geändert, nichts abgebucht (Stand {energy})
+store.soldout=Seite ist ausverkauft
+
+log.invalid_packet=Ungültiges Paket vom Server ({type}): {text}
+log.slot.game=Slot "{slot}" spielt "{game}".
+log.datapackage.failed=DataPackage konnte nicht geladen werden: {error}
+log.buy.revert.failed=Rückbuchung fehlgeschlagen ({amount} J).
+log.buy.race=EnergyLink änderte sich während des Kaufs, nichts abgebucht.
+log.slot.game.cached=Spielname aus dem Cache: Slot "{slot}" spielt "{game}".
+status.goal=Ziel
+store.price.inflated=Preis erhöht durch Inflation
+log.items.mcguffin=McGuffin erhalten ({count}x), Stand {got} / {total}
+log.items.trap=Trap erhalten: {trap}
+log.trap.tax=Steuer-Trap: {amount} aus dem EnergyLink abgezogen, neuer Stand {value}
+log.trap.inflation=Inflation-Trap: Preise steigen um {percent}%
+log.trap.failed=Trap konnte nicht angewendet werden: {error}
+console.traps=tax: {tax} · inflation: {inflation} · Preis-Faktor {factor}
+connect.error.invalidSlot=Slotname "{slot}" gibt es in diesem Raum nicht. Prüfe den Namen in deiner YAML und ob der Raum mit dieser YAML generiert wurde.
+connect.error.invalidGame=Der Slot spielt ein anderes Spiel als angegeben.
+connect.error.invalidPassword=Falsches Passwort.
+connect.error.version=Client und Server passen nicht zusammen (Archipelago-Version).
+connect.error.items=Der Server akzeptiert die Item-Einstellung nicht.
+log.slot.game.stale=Gecachter Spielname "{game}" für Slot "{slot}" passt nicht mehr, frage neu ab.
+log.connect.protocol={url} nicht erreichbar, versuche {next}
+connect.error.unreachable=Server nicht erreichbar. Versucht: {url}. Prüfe Adresse, Port und ob der Server läuft. Ein öffentlicher Host braucht wss, ein selbst gehosteter ohne Zertifikat geht nur mit ws.
+store.kind.progression=Progress
+store.kind.useful=Nützlich
+store.kind.trap=Trap
+store.kind.filler=Filler
+store.kind.unknown=Unbekannt
+store.auto.page=Erste offene Seite gewählt: Seite {page}
+log.scout.failed=Inhalte der Locations konnten nicht abgefragt werden: {error}
+log.scouted={count} Locations abgefragt, Kategorien geladen.

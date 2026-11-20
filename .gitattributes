@@ -1,0 +1,9 @@
+# Normalize line endings so the shell scripts stay executable on Unix and the .cmd file works on Windows.
+* text=auto
+*.sh text eol=lf
+*.cmd text eol=crlf
+*.py text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.lang text eol=lf
+*.apworld binary

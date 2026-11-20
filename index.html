@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Energylink Store</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>">
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand__bolt" aria-hidden="true">⚡</span>
+            <div>
+                <h1 class="brand__title" data-i18n="app.title">Energylink Store</h1>
+                <p class="brand__subtitle" data-i18n="app.subtitle">Item store built on the EnergyLink system</p>
+            </div>
+        </div>
+        <div class="topbar__actions">
+            <label class="field field--inline">
+                <span class="field__label" data-i18n="btn.language">Language</span>
+                <select id="language-select" class="select"></select>
+            </label>
+            <button type="button" id="disconnect-button" class="button button--ghost" disabled data-i18n="connect.disconnect">Disconnect</button>
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="panel panel--connect" id="connect-panel">
+            <h2 class="panel__title" data-i18n="connect.title">Connect to Archipelago</h2>
+            <form id="connect-form" class="connect-form" autocomplete="off">
+                <label class="field">
+                    <span class="field__label" data-i18n="connect.server">Server (url:port)</span>
+                    <input class="input" type="text" id="server-input" name="server" spellcheck="false"
+                           placeholder="archipelago.gg:38281" data-i18n-placeholder="connect.server.placeholder" required>
+                </label>
+                <label class="field">
+                    <span class="field__label" data-i18n="connect.slot">Slot name</span>
+                    <input class="input" type="text" id="slot-input" name="slot" spellcheck="false"
+                           placeholder="Your slot name" data-i18n-placeholder="connect.slot.placeholder" required>
+                </label>
+                <label class="field">
+                    <span class="field__label" data-i18n="connect.password">Password (optional)</span>
+                    <input class="input" type="password" id="password-input" name="password"
+                           placeholder="Leave empty if no password is set" data-i18n-placeholder="connect.password.placeholder">
+                </label>
+                <button type="submit" class="button button--primary" id="connect-button" data-i18n="connect.button">Connect</button>
+            </form>
+            <p class="hint" id="connect-hint" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel panel--status">
+            <h2 class="panel__title" data-i18n="status.title">Status</h2>
+            <dl class="stats">
+                <div class="stats__row">
+                    <dt data-i18n="status.connection">Connection</dt>
+                    <dd id="stat-connection" class="stat-value stat-value--off" data-i18n="status.disconnected">Disconnected</dd>
+                </div>
+                <div class="stats__row stats__row--energy">
+                    <dt data-i18n="status.energy">EnergyLink</dt>
+                    <dd id="stat-energy" class="stat-value stat-value--energy">- J</dd>
+                </div>
+                <div class="stats__row">
+                    <dt data-i18n="status.slot">Slot</dt>
+                    <dd id="stat-slot" class="stat-value">-</dd>
+                </div>
+                <div class="stats__row">
+                    <dt data-i18n="status.game">Game</dt>
+                    <dd id="stat-game" class="stat-value">-</dd>
+                </div>
+                <div class="stats__row">
+                    <dt data-i18n="status.seed">Seed</dt>
+                    <dd id="stat-seed" class="stat-value">-</dd>
+                </div>
+                <div class="stats__row">
+                    <dt data-i18n="status.progress">Progress</dt>
+                    <dd id="stat-progress" class="stat-value">-</dd>
+                </div>
+                <div class="stats__row">
+                    <dt data-i18n="status.goal">Goal</dt>
+                    <dd id="stat-goal" class="stat-value">-</dd>
+                </div>
+            </dl>
+        </section>
+
+        <section class="panel panel--store">
+            <div class="store-head">
+                <h2 class="panel__title" data-i18n="store.title">Store</h2>
+                <div class="store-balance" title="EnergyLink">
+                    <span class="store-balance__label" data-i18n="store.balance">Balance</span>
+                    <strong id="store-balance" class="store-balance__value">- J</strong>
+                </div>
+            </div>
+
+            <div class="pager">
+                <button type="button" id="prev-page" class="button button--ghost button--icon" data-i18n-title="store.prev" aria-label="Previous page">‹</button>
+                <div class="pager__info">
+                    <span id="page-indicator" class="pager__label">Seite 0 / 0</span>
+                    <span id="page-summary" class="pager__summary"></span>
+                </div>
+                <button type="button" id="next-page" class="button button--ghost button--icon" data-i18n-title="store.next" aria-label="Next page">›</button>
+            </div>
+
+            <ol id="page-tabs" class="page-tabs" role="tablist"></ol>
+            <div id="location-list" class="locations" aria-live="polite"></div>
+
+            <div class="store-footer">
+                <p id="store-message" class="store-message" role="status" aria-live="polite"></p>
+                <button type="button" id="buy-button" class="button button--buy" disabled data-i18n="store.buy">Buy</button>
+            </div>
+        </section>
+
+        <section class="panel panel--console" id="console-panel">
+            <div class="console-head">
+                <h2 class="panel__title" data-i18n="console.title">Console</h2>
+                <div class="console-tools">
+                    <button type="button" class="chip is-active" data-console-level="all">all</button>
+                    <button type="button" class="chip" data-console-level="log">log</button>
+                    <button type="button" class="chip" data-console-level="chat">chat</button>
+                    <button type="button" class="chip" id="console-clear" data-console-clear data-i18n="console.clear">Clear</button>
+                </div>
+            </div>
+            <div class="console-output" data-console-output></div>
+            <form class="console-form" data-console-form autocomplete="off">
+                <span class="console-prompt" aria-hidden="true">$</span>
+                <input class="input console-input" data-console-input type="text" spellcheck="false"
+                       placeholder="Enter a command (help for help)" data-i18n-placeholder="console.placeholder"
+                       aria-label="Console input">
+                <button type="submit" class="button" data-i18n="console.send">Send</button>
+            </form>
+        </section>
+    </main>
+
+    <div id="boot-error" class="boot-error" hidden>
+        <h2 id="boot-error-title">Seite konnte nicht starten</h2>
+        <p id="boot-error-text"></p>
+        <pre id="boot-error-detail"></pre>
+    </div>
+
+    <script>
+        // ES modules are blocked on file:// (CORS) and any import error leaves a silent page,
+        // so a failure has to be shown instead of an empty UI.
+        (function () {
+            function show(title, text, detail) {
+                var box = document.getElementById('boot-error');
+                if (!box) { return; }
+                document.getElementById('boot-error-title').textContent = title;
+                document.getElementById('boot-error-text').textContent = text;
+                var pre = document.getElementById('boot-error-detail');
+                pre.textContent = detail || '';
+                pre.hidden = !detail;
+                box.hidden = false;
+            }
+            window.__showBootError = show;
+
+            if (location.protocol === 'file:') {
+                show(
+                    'Bitte über einen Webserver öffnen',
+                    'Die Seite wurde direkt als Datei geöffnet (file://). Browser blockieren dabei '
+                    + 'JavaScript-Module, deshalb bleiben Sprachauswahl und Konsole leer. '
+                    + 'Starte den mitgelieferten Server (start.sh bzw. start.cmd) und öffne '
+                    + 'http://localhost:3000/index.html.',
+                    location.href
+                );
+            }
+            window.addEventListener('error', function (event) {
+                show('Fehler beim Laden', 'Ein Skript konnte nicht geladen werden.',
+                    (event.message || '') + (event.filename ? '\n' + event.filename : ''));
+            });
+            window.addEventListener('unhandledrejection', function (event) {
+                show('Fehler beim Start',
+                    'Die Anwendung konnte nicht initialisiert werden.',
+                    String((event.reason && (event.reason.stack || event.reason.message)) || event.reason || ''));
+            });
+            setTimeout(function () {
+                if (!window.energylinkStore) {
+                    show('Anwendung nicht gestartet',
+                        'Das Hauptskript wurde nicht ausgeführt. Meist liegt das an file:// oder an '
+                        + 'einem fehlenden Server. Öffne die Seite über http://localhost:3000/index.html.',
+                        '');
+                }
+            }, 4000);
+        })();
+    </script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

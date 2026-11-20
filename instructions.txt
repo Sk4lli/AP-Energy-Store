@@ -1,0 +1,16 @@
+
+Project "Archipelago Energylink Store"
+
+Erstelle ein Rein browser basierenden CLient für Archipelago.
+es soll nur HTML, CSS, und Jscript genutzt werden.
+zum verbinden zu Archipealgo wird archipelago.js genutzt. (https://github.com/ThePhar/archipelago.js/)
+
+Das ziel ist ein web bassierender Item Store auf der Basis von dem Energylink system.
+der store hat mehrere Seiten (Progress Item) mit "Locations" zum kaufen. (Location per progress.)
+in der Config Yaml wird angegeben wie viele ProgressItems es geben soll und Wieveiel Location je ProgressItem. d.h. Location je Seite.
+es sollen 5-10 Locations pro Seite möglich sein.
+es Währung wird direkt Joule genutzt da die Basis des EnergyLink systems die Joule aus Factorio sind.
+
+Die WebApplikation hat auch einen konsole eingebaut als Textclient, für befehle und Fehlerlog.
+
+Die Sprache der Webapplikation sollte aus einer auswählbaren 'lang/de_DE.lang' (textdatei) geladen werden.

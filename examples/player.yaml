@@ -1,0 +1,24 @@
+# Player-YAML Beispiel für den Energylink Store.
+#
+# Die Werte landen als slot_data beim Client. Fehlen sie, nutzt der Store
+# Standardwerte (5 Seiten, 5 Locations je Seite, 1 MJ Basispreis, 1 MJ Aufschlag).
+
+name: Tester
+game: Test World
+
+Test World:
+  # Anzahl der Progress-Seiten im Store
+  progress_items: 5
+
+  # Locations je Progress-Seite (erlaubt: 5 bis 10)
+  locations_per_page: 8
+
+  # Preis einer Location auf Seite 1, in Joule
+  base_price: 750000
+
+  # Aufschlag pro Seite, in Joule
+  # Seite 1: 750k, Seite 2: 2,25M, Seite 3: 3,75M, ...
+  price_step: 1500000
+
+  # Optional: EnergyLink-Schlüssel überschreiben (Standard: EnergyLink<team>)
+  # energylink_key: EnergyLink0

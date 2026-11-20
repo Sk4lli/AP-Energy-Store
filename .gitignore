@@ -1,0 +1,14 @@
+# dependencies and generated files (the app itself needs none of them)
+node_modules/
+package-lock.json
+
+# build output of the APWorld
+apworld/*.apworld
+
+# python
+__pycache__/
+*.pyc
+
+# test artefacts
+tests/*.png
+tests/_*
