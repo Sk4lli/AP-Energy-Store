@@ -398,7 +398,7 @@ body {
 
 .location {
     display: grid;
-    grid-template-columns: 38px 1fr auto auto;
+    grid-template-columns: 24px 38px 1fr auto auto;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -417,6 +417,30 @@ body {
 
 .location--locked {
     opacity: 0.5;
+}
+
+.location--selected {
+    border-color: var(--accent, #4d8dff);
+    background: rgba(77, 141, 255, 0.12);
+}
+
+/* Tick that picks a row for the next purchase. */
+.location__pick {
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+}
+
+.location__check {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent, #4d8dff);
+    cursor: pointer;
+}
+
+.location__check:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
 }
 
 .location__index {

@@ -27,35 +27,83 @@ const ENERGY = Number(opt('energy', 5000000));
 const PAGES = Number(opt('pages', 3));
 const PER_PAGE = Number(opt('perpage', 5));
 const FAIL_CHECKS = Boolean(opt('fail-checks', false));
-// Mit --push-traps <n> landen Traps dieses Slots bei Slot n (Multiworld-Fall: ein anderer
-// Spieler kauft die Location, das Item kommt bei uns an).
+// With --push-traps <n> the traps of this slot are delivered to slot n (multiworld case: another
+// player buys the location and its item arrives here).
 const PUSH_TRAPS_TO = Number(opt('push-traps', 0)) || 0;
+// With --items-to-other the items of bought locations go to another player instead of us. That is
+// the case "I buy, the item belongs to someone else" -- the traps must not fire here then. In the
+// protocol `player` is the *sending* slot, i.e. whoever bought the location.
+const ITEMS_TO_OTHER = Boolean(opt('items-to-other', false));
 const NO_SLOT_DATA = Boolean(opt('no-slot-data', false));
+// With --no-traps the layout only has McGuffins and filler. Handy for tests that do arithmetic on
+// prices and the balance: a trap would change prices or the pool in the middle of the test.
+const NO_TRAPS = Boolean(opt('no-traps', false));
+// Unlock mode: "page" (item "Store Page <n>" per page) or "progressive" (nth copy opens page n+1).
+const UNLOCK_MODE = String(opt('unlock', 'page'));
+// With --start-unlocked 2,3 these further pages are open from the start. Page 1 is always open,
+// the client decides that itself, so it does not need an item here.
+const START_UNLOCKED = String(opt('start-unlocked', '') || '')
+    .split(',')
+    .map((value) => Number.parseInt(value.trim(), 10))
+    .filter((value) => Number.isFinite(value) && value >= 2);
 const LOCATION_BASE = 1000;
 
 const locationIds = Array.from({ length: PAGES * PER_PAGE }, (_, i) => LOCATION_BASE + i);
 const locationNames = Object.fromEntries(locationIds.map((id, i) => [`Location ${i + 1}`, id]));
 
+const PROGRESSIVE_UNLOCK_ITEM = 'Progressive Store Unlock';
+const PAGE_UNLOCK_PREFIX = 'Store Page ';
+const UNLOCK_BASE_ID = 600;
+
+/** Item name that opens page n. */
+function unlockItemName(page) {
+    return UNLOCK_MODE === 'progressive' ? PROGRESSIVE_UNLOCK_ITEM : `${PAGE_UNLOCK_PREFIX}${page}`;
+}
+
+// Every unlock item the loaded data package knows, so the client can resolve the ids.
+const unlockItemIds = {};
+for (let page = 1; page <= PAGES; page += 1) {
+    unlockItemIds[unlockItemName(page)] = UNLOCK_MODE === 'progressive' ? UNLOCK_BASE_ID : UNLOCK_BASE_ID + page;
+}
+// Page 1 has no unlock item in this world, so the client never gets one for it.
+const unlockableFromPage = 2;
+
+// The unlock items that arrived before the run, handed out with the start inventory.
+const START_ITEMS = [
+    { item: 500, location: 0, player: 1, flags: 1 },
+    ...START_UNLOCKED.filter((page) => page >= unlockableFromPage).map((page, index) => ({
+        item: unlockItemIds[unlockItemName(page)],
+        location: 0,
+        player: 1,
+        flags: 1,
+        // only used to keep the entries apart in the received list
+        index,
+    })),
+];
+
 const storage = new Map([[`EnergyLink0`, ENERGY]]);
 const checked = new Set();
 const items = [];
+// What this slot really received. The server keeps that per slot, so items a bought location sends
+// to another player never show up here.
+const receivedByUs = [];
 
 // Deterministic item/classification per location so the tests can rely on it.
 // Fixed layout per page of five: filler, Inflation Trap, Tax Trap, McGuffin, filler.
 // Location 1 of a page is always a plain filler, so a single buy does not trigger a trap.
 function itemForLocation(id) {
     const index = (id - LOCATION_BASE) % 5;
-    if (index === 1) return 503;          // Inflation Trap
-    if (index === 2) return 502;          // Tax Trap
-    if (index === 3) return 500;          // McGuffin
-    return 501;                           // Store Filler
+    if (index === 1) return NO_TRAPS ? 500 : 503;   // Inflation Trap (ohne Traps: McGuffin)
+    if (index === 2) return NO_TRAPS ? 501 : 502;   // Tax Trap (ohne Traps: Filler)
+    if (index === 3) return 500;                    // McGuffin
+    return 501;                                     // Store Filler
 }
 
 function flagsForLocation(id) {
     const index = (id - LOCATION_BASE) % 5;
-    if (index === 3) return 1;            // progression (McGuffin)
-    if (index === 1 || index === 2) return 4;   // trap
-    return 0;                             // filler
+    if (index === 3 || (NO_TRAPS && index === 1)) return 1;   // progression (McGuffin)
+    if (!NO_TRAPS && (index === 1 || index === 2)) return 4;  // trap
+    return 0;                                                  // filler
 }
 const log = [];
 
@@ -131,7 +179,7 @@ wss.on('connection', (ws) => {
                 noLocations = textOnly;
                 logLine('auth ok', textOnly ? '(TextOnly)' : `(game ${packet.game})`);
                 // Give the client its starting items, like the real server does.
-                const startItems = [{ item: 500, location: 0, player: 1, flags: 1 }];
+                const startItems = START_ITEMS;
                 send([{
                     cmd: 'Connected',
                     team: 0,
@@ -146,6 +194,9 @@ wss.on('connection', (ws) => {
                     slot_data: NO_SLOT_DATA ? {} : {
                         progress_items: PAGES,
                         locations_per_page: PER_PAGE,
+                        unlock_mode: UNLOCK_MODE,
+                        unlock_item: PROGRESSIVE_UNLOCK_ITEM,
+                        unlock_item_prefix: PAGE_UNLOCK_PREFIX,
                         base_price: 1000000,
                         price_step: 1000000,
                         mcguffins_required: 6,
@@ -157,7 +208,10 @@ wss.on('connection', (ws) => {
                         store_version: 1,
                     },
                 }]);
-                send([{ cmd: 'ReceivedItems', index: 0, items: startItems }]);
+                // Like the real server: index 0 carries the start inventory and everything this
+                // slot received so far in one list. Items addressed to another slot are not ours,
+                // the server never delivers those to us.
+                send([{ cmd: 'ReceivedItems', index: 0, items: [...startItems, ...receivedByUs] }]);
                 return;
             }
             case 'GetDataPackage': {
@@ -172,6 +226,7 @@ wss.on('connection', (ws) => {
                                 'Store Filler': 501,
                                 'Tax Trap': 502,
                                 'Inflation Trap': 503,
+                                ...unlockItemIds,
                             },
                             location_name_to_id: locationNames,
                         };
@@ -242,16 +297,32 @@ wss.on('connection', (ws) => {
                 }
                 logLine('checked', newIds.join(','));
                 if (newIds.length > 0) {
-                    // The item comes from the same table the scout answers use.
+                    // The item comes from the same table the scout answers use. Items of another
+                    // slot are not delivered to us, like on a real server.
+                    const delivered = [];
                     for (const id of newIds) {
-                        items.push({
+                        const entry = {
                             item: itemForLocation(id),
                             location: id,
-                            player: 1,
+                            // `player` is the slot that found the item, i.e. the buyer.
+                            player: ITEMS_TO_OTHER ? 2 : 1,
                             flags: flagsForLocation(id),
-                        });
+                        };
+                        items.push(entry);
+                        // Items of another slot are not delivered to us, like on a real server.
+                        if (!ITEMS_TO_OTHER) {
+                            delivered.push(entry);
+                        }
                     }
-                    send([{ cmd: 'ReceivedItems', index: items.length - newIds.length, items: items.slice(-newIds.length) }]);
+                    if (delivered.length > 0) {
+                        // The index counts what this slot received, so it continues after it.
+                        receivedByUs.push(...delivered);
+                        send([{
+                            cmd: 'ReceivedItems',
+                            index: START_ITEMS.length + receivedByUs.length - delivered.length,
+                            items: delivered,
+                        }]);
+                    }
                     send([{ cmd: 'RoomUpdate', checked_locations: newIds }]);
                     send([{
                         cmd: 'PrintJSON',
@@ -275,7 +346,13 @@ wss.on('connection', (ws) => {
             }
             case 'DebugPushTrap': {
                 // Test hook: deliver a trap item as if another player had bought that location.
+                // A location yields its item once, also here: a repeated push is a protocol
+                // violation the real server cannot produce (see send_new_items), so it is ignored.
                 const id = Number(packet.location);
+                if (items.some((entry) => entry.location === id)) {
+                    logLine(`ignored repeated push for location ${id}`);
+                    return;
+                }
                 const entry = {
                     item: itemForLocation(id),
                     location: id,
@@ -283,8 +360,29 @@ wss.on('connection', (ws) => {
                     flags: 4,
                 };
                 items.push(entry);
+                receivedByUs.push(entry);
                 logLine(`pushed trap for location ${id} (from slot ${entry.player})`);
-                send([{ cmd: 'ReceivedItems', index: items.length - 1, items: [entry] }]);
+                send([{ cmd: 'ReceivedItems', index: START_ITEMS.length + receivedByUs.length - 1, items: [entry] }]);
+                return;
+            }
+            case 'DebugPushUnlock': {
+                // Test hook: hand the client the unlock item of a page, as if that item had just
+                // been found somewhere in the multiworld.
+                const page = Number(packet.page);
+                if (page < unlockableFromPage) {
+                    logLine(`page ${page} has no unlock item`);
+                    return;
+                }
+                const name = unlockItemName(page);
+                const itemId = unlockItemIds[name];
+                if (!itemId) {
+                    logLine(`unknown unlock page ${packet.page}`);
+                    return;
+                }
+                const entry = { item: itemId, location: 0, player: 2, flags: 1 };
+                receivedByUs.push(entry);
+                logLine(`pushed unlock for page ${page} (${name})`);
+                send([{ cmd: 'ReceivedItems', index: START_ITEMS.length + receivedByUs.length - 1, items: [entry] }]);
                 return;
             }
             case 'Say': {

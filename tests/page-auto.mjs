@@ -28,10 +28,15 @@ await p.evaluate(async () => {
 });
 await p.waitForTimeout(400);
 
-for (let i = 0; i < 5; i += 1) {
-  await p.evaluate(() => window.energylinkStore.console().run('buy'));
-  await p.waitForTimeout(900);
-}
+// Page 2 needs its unlock; without it the store stays on page 1 and says so.
+await p.evaluate(() => window.energylinkStore.store.client.socket.send({ cmd: 'DebugPushUnlock', page: 2 }));
+await p.waitForTimeout(700);
+
+// Select every row of page 1 and buy them in one go.
+await p.evaluate(() => window.energylinkStore.console().run('select all'));
+await p.waitForTimeout(300);
+await p.evaluate(() => window.energylinkStore.console().run('buy'));
+await p.waitForTimeout(1600);
 const afterPage1 = await p.evaluate(() => ({
   bought: window.energylinkStore.model.pages[0].bought,
   page: window.energylinkStore.model.page,

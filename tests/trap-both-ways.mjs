@@ -1,7 +1,7 @@
-// A trap of this store must fire in both cases, but only once per location:
-//   1. you buy the location in the store            -> trap fires
-//   2. another player buys it, the item arrives here -> trap fires
-// The same trap must not count twice, and a reconnect must not replay it.
+// A trap fires when its item arrives here, and only then:
+//   1. you buy the location, your own item comes back  -> trap fires once
+//   2. another player buys it, the item is sent here   -> trap fires once
+// A reconnect replays the item list but must not burn the pool a second time.
 import { chromium } from 'playwright';
 let fail = 0;
 const ck = (n, c, x = '') => { console.log(c ? `  ok   ${n}` : `  FAIL ${n} ${x}`); if (!c) fail++; };
@@ -38,23 +38,27 @@ const taxSlot = layout.find((s) => s.name === 'Tax Trap');
 const before1 = await p.evaluate(() => ({ energy: window.energylinkStore.store.energy, inflation: window.energylinkStore.store.trapEffects.inflation }));
 await p.evaluate((n) => window.energylinkStore.console().run(`buy ${n}`), inflationSlot.n);
 await p.waitForTimeout(1400);
-const after1 = await p.evaluate(() => ({ energy: window.energylinkStore.store.energy, inflation: window.energylinkStore.store.trapEffects.inflation, fired: window.energylinkStore.store.trapFired.size }));
+const after1 = await p.evaluate(() => ({ energy: window.energylinkStore.store.energy, inflation: window.energylinkStore.store.trapEffects.inflation, burnt: window.energylinkStore.store.inflationBurned }));
 console.log(`    own inflation buy: energy ${before1.energy}->${after1.energy}, inflation ${before1.inflation}->${after1.inflation}`);
 ck('own inflation trap fired', after1.inflation === before1.inflation + 1, String(after1.inflation));
 ck('pool was burned', after1.energy < before1.energy - 1000000, `${before1.energy} -> ${after1.energy}`);
 
-// --- 2. the same trap must not count twice when the item arrives as well
-await p.evaluate((id) => window.energylinkStore.store.client.socket.send({ cmd: 'DebugPushTrap', location: id }), inflationSlot.id);
-await p.waitForTimeout(1200);
-const after2 = await p.evaluate(() => ({ inflation: window.energylinkStore.store.trapEffects.inflation, fired: window.energylinkStore.store.trapFired.size }));
-console.log(`    after item replay of same location: inflation ${after2.inflation}`);
+// --- 2. the same trap must not count twice when its item is delivered again
+// The server never does this (one location, one item), the mock drops the repeat, so the check
+// here is that our own bookkeeping stays put even if a packet were repeated.
+await p.evaluate((id) => window.energylinkStore.store._onItemsReceived(
+    [{ name: 'Inflation Trap', locationId: id }], 99), inflationSlot.id);
+await p.waitForTimeout(400);
+const after2 = await p.evaluate(() => ({ inflation: window.energylinkStore.store.trapEffects.inflation, burnt: window.energylinkStore.store.inflationBurned }));
+console.log(`    after a repeated delivery of the same location: inflation ${after1.inflation}->${after2.inflation}, burnt ${after1.burnt}->${after2.burnt}`);
 ck('same location is not counted twice', after2.inflation === after1.inflation, `${after1.inflation} -> ${after2.inflation}`);
+ck('the same trap is not burnt twice', after2.burnt === after1.burnt, `${after1.burnt} -> ${after2.burnt}`);
 
 // --- 3. a trap that only arrives from another world (not bought here)
 const before3 = await p.evaluate(() => ({ tax: window.energylinkStore.store.trapEffects.tax, price: window.energylinkStore.model.priceOf(1) }));
 await p.evaluate((id) => window.energylinkStore.store.client.socket.send({ cmd: 'DebugPushTrap', location: id }), taxSlot.id);
 await p.waitForTimeout(1400);
-const after3 = await p.evaluate(() => ({ tax: window.energylinkStore.store.trapEffects.tax, price: window.energylinkStore.model.priceOf(1), fired: window.energylinkStore.store.trapFired.size }));
+const after3 = await p.evaluate(() => ({ tax: window.energylinkStore.store.trapEffects.tax, price: window.energylinkStore.model.priceOf(1) }));
 console.log(`    incoming tax trap: tax ${before3.tax}->${after3.tax}, price ${before3.price}->${after3.price}`);
 ck('incoming trap fired without buying', after3.tax === before3.tax + 1, String(after3.tax));
 ck('incoming tax raised the price', after3.price > before3.price, `${before3.price} -> ${after3.price}`);

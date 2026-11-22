@@ -4,8 +4,58 @@ The store client reads the same values from slot_data, so every number here ends
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from Options import Choice, OptionGroup, PerGameCommonOptions, Range, Toggle
+
+from .Joules import format_joules, parse_joules
+
+# 1 TJ is the largest amount a Joule option accepts. Anything above is a typo, not a price.
+MAX_JOULES = 1_000_000_000_000
+
+
+class JouleOption(Range):
+    """A range of Joule amounts that also reads short forms.
+
+    A plain number is a plain amount of Joules, so old YAMLs keep working. On top of that the
+    decimal prefixes k/kilo, m/mega, g/giga and t/tera are accepted, optionally followed by a j:
+
+        750k   1.5m   2g   1t   1.5mj   750 kj   1 500 000
+
+    The value is stored and sent as a whole number of Joules. In the spoiler log, the options page
+    and the generated CSV it is written back in the short form.
+    """
+
+    @classmethod
+    def from_text(cls, text: str) -> "JouleOption":
+        text = text.strip()
+        lowered = text.lower()
+        # "random", "random-low", "high", "low", "default" and "true"/"false" stay with the core.
+        if lowered in ("high", "low", "default", "true", "false") or lowered.startswith("random"):
+            return super().from_text(text)
+
+        try:
+            value = parse_joules(text)
+        except ValueError as error:
+            raise Exception(str(error)) from error
+
+        try:
+            return cls(value)
+        except Exception as error:
+            raise Exception(
+                f"{text!r} is {format_joules(value)}, but {cls.__name__} allows "
+                f"{format_joules(cls.range_start)} to {format_joules(cls.range_end)}."
+            ) from error
+
+    @classmethod
+    def from_any(cls, data: Any) -> "JouleOption":
+        if type(data) is int:
+            return cls(data)
+        return cls.from_text(str(data))
+
+    @classmethod
+    def get_option_name(cls, value: int) -> str:
+        return format_joules(value)
 
 
 class ProgressPages(Range):
@@ -32,25 +82,45 @@ class LocationsPerPage(Range):
     default = 5
 
 
-class BasePrice(Range):
-    """Price of a location on page 1, in joules of the EnergyLink pool."""
+class BasePrice(JouleOption):
+    """Price of a location on page 1, in joules of the EnergyLink pool.
+
+    Short forms are accepted: ``750k``, ``1.5m``, ``2g``, ``1t``. A plain number is read as joules.
+    """
 
     display_name = "Base Price (Joules)"
     range_start = 10_000
-    range_end = 100_000_000
+    range_end = MAX_JOULES
     default = 1_000_000
 
 
-class PriceStep(Range):
+class PriceStep(JouleOption):
     """Added to the price for every further page, in joules.
 
     With a base price of 1 MJ and a step of 1 MJ a page 1 location costs 1 MJ, page 2 costs 2 MJ, and so on.
+    Short forms are accepted here too: ``250k``, ``1.5m``, ``1t``.
     """
 
     display_name = "Price Step (Joules)"
     range_start = 0
-    range_end = 100_000_000
+    range_end = MAX_JOULES
     default = 1_000_000
+
+
+class UnlockMode(Choice):
+    """How the store pages are unlocked.
+
+    ``page``: every page has its own item ("Store Page 1", "Store Page 2", ...). The item for page N
+    opens page N only, not the pages before or after it.
+
+    ``progressive``: one item ("Progressive Store Unlock") opens the pages in order. The first copy
+    opens page 1, the second page 2, and so on.
+    """
+
+    display_name = "Store Unlock Mode"
+    option_page = 0
+    option_progressive = 1
+    default = 0
 
 
 class McguffinCount(Range):
@@ -75,12 +145,15 @@ class TrapFillPercentage(Range):
     default = 15
 
 
-class FillerJoules(Range):
-    """How much joule a plain filler item is worth when the store client shows it."""
+class FillerJoules(JouleOption):
+    """How much joule a plain filler item is worth when the store client shows it.
+
+    Short forms are accepted as well, for example ``500k`` or ``1.5m``.
+    """
 
     display_name = "Filler Value (Joules)"
     range_start = 0
-    range_end = 10_000_000
+    range_end = MAX_JOULES
     default = 0
 
 
@@ -137,6 +210,7 @@ class EnergyLinkShared(Toggle):
 class EnergylinkStoreOptions(PerGameCommonOptions):
     progress_pages: ProgressPages
     locations_per_page: LocationsPerPage
+    unlock_mode: UnlockMode
     base_price: BasePrice
     price_step: PriceStep
     mcguffins_required: McguffinCount
@@ -152,7 +226,7 @@ class EnergylinkStoreOptions(PerGameCommonOptions):
 option_groups = [
     OptionGroup(
         "Store Layout",
-        [ProgressPages, LocationsPerPage, BasePrice, PriceStep, EnergyLinkShared],
+        [ProgressPages, LocationsPerPage, UnlockMode, BasePrice, PriceStep, EnergyLinkShared],
     ),
     OptionGroup(
         "Items and Goal",

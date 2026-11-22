@@ -156,6 +156,7 @@ function syncModel({ keepPage = false } = {}) {
         checked: store.checkedLocationIds(),
         taxSteps: store.taxSteps ?? 0,
         classification: store.scouted,
+        unlocked: store.unlockedPages,
     });
     if (!keepPage) {
         model.showFirstOpenPage();
@@ -167,13 +168,19 @@ function syncModel({ keepPage = false } = {}) {
 /**
  * Asks the server what is in the locations, so the store can label them
  * "Progression", "Useful", "Trap" or "Filler" instead of "Page 1 Location 1".
- * Race seeds refuse this; the labels then fall back to the location number.
+ *
+ * Only open pages are scouted. A locked page must not reveal what is in it, and asking the server
+ * would be exactly that -- the answer is in the network tab even if the UI hides it.
+ *
+ * Race seeds refuse this; the labels then fall back to "Unknown".
  */
 async function scoutStore() {
     if (!store.isConnected || !model.hasData) {
         return;
     }
-    const ids = [...new Set(model.pages.flatMap((page) => page.slots.map((slot) => slot.id)))];
+    const ids = [...new Set(model.pages
+        .filter((page) => model.pageUnlocked(page.number))
+        .flatMap((page) => page.slots.map((slot) => slot.id)))];
     const missing = ids.filter((id) => !(id in (store.scouted ?? {})));
     if (missing.length === 0) {
         return;
@@ -193,6 +200,18 @@ function kindLabel(kind) {
     return map[kind] ?? map.unknown;
 }
 
+/** True for an item that opens a store page (either unlock mode). */
+function isUnlockItem(name) {
+    const config = store.config;
+    if (!config || typeof name !== 'string') {
+        return false;
+    }
+    if (config.unlockMode === 'progressive') {
+        return name === config.unlockItem;
+    }
+    return name.startsWith(config.unlockItemPrefix);
+}
+
 function setStoreMessage(text, kind = '') {
     dom.storeMessage.textContent = text;
     dom.storeMessage.className = `store-message${kind ? ` store-message--${kind}` : ''}`;
@@ -200,7 +219,12 @@ function setStoreMessage(text, kind = '') {
 
 /* ---------------------------------------------------------------- buttons */
 
-async function buyCurrent() {
+/**
+ * Buys every ticked location of the current page. One price is charged for the sum, then the
+ * locations are checked one by one, so a partial failure stays visible instead of silently
+ * charging for nothing.
+ */
+async function buySelection() {
     if (!model.hasData) {
         return;
     }
@@ -209,34 +233,27 @@ async function buyCurrent() {
         return;
     }
     const page = model.currentPage;
-    const slot = model.nextFreeSlot();
-    if (!slot) {
-        setStoreMessage(t('store.soldout'), 'warn');
-        return;
-    }
-    const check = model.canBuy(page.number, store.energy);
+    const check = model.canBuySelection(store.energy, page?.number);
     if (!check.ok) {
-        setStoreMessage(reasonText(check), 'warn');
+        setStoreMessage(reasonText(check), check.reason === 'insufficient' ? 'warn' : '');
         return;
     }
     dom.buyButton.disabled = true;
-    setStoreMessage(t('log.buy.start', {
-        location: store.locationName(slot.id),
+    const message = t('log.buy.selection', {
+        count: check.count,
+        total: formatEnergy(check.cost, model.locale),
         page: page.number,
-        price: formatEnergy(check.price, model.locale),
-    }));
-    consoleUi.write(t('log.buy.start', {
-        location: store.locationName(slot.id),
-        page: page.number,
-        price: formatEnergy(check.price, model.locale),
-    }), 'info');
+    });
+    setStoreMessage(message);
+    consoleUi.write(message, 'info');
 
-    const result = await store.buyLocation(slot.id, check.price);
+    const result = await store.buyLocations(check.ids, check.cost);
     if (result.ok) {
-        model.setChecked([slot.id]);
+        model.setChecked(result.locations);
+        model.clearSelection();
         model.showFirstOpenPage();
         const text = t('store.purchase.ok', {
-            location: store.locationName(slot.id),
+            location: `${result.locations.length} x`,
             price: formatEnergy(result.price, model.locale),
         });
         setStoreMessage(text, 'ok');
@@ -244,8 +261,15 @@ async function buyCurrent() {
             amount: formatEnergy(result.charged, model.locale),
             value: formatEnergy(result.energy, model.locale),
         }), 'info');
-        consoleUi.write(t('log.buy.done', { location: store.locationName(slot.id) }), 'info');
+        for (const id of result.locations) {
+            consoleUi.write(t('log.buy.done', { location: store.locationName(id) }), 'info');
+        }
     } else {
+        if (result.locations?.length) {
+            // Charged and checked, only some of them failed. Show what went through.
+            model.setChecked(result.locations);
+            model.setChecked([...store.checkedLocationIds()]);
+        }
         const reason = reasonText(result);
         setStoreMessage(t('store.purchase.failed', { reason }), 'error');
         consoleUi.write(t('log.buy.error', { error: reason }), 'error');
@@ -258,9 +282,11 @@ function reasonText(check) {
         case 'insufficient':
             return t('store.too.expensive');
         case 'locked':
-            return t('store.need.previous', { page: check.needs ?? check.page - 1 });
+            return t('store.need.unlock', { page: check.page ?? model.page });
         case 'soldout':
             return t('store.soldout');
+        case 'no selection':
+            return t('store.select.none');
         case 'already checked':
             return t('store.owned');
         case 'race':
@@ -315,7 +341,7 @@ function renderPageTabs() {
     }
     const tabs = model.pages.map((page) => {
         const locked = !model.pageUnlocked(page.number);
-        const done = page.total > 0 && page.bought >= page.total;
+        const done = !locked && page.total > 0 && page.bought >= page.total;
         const item = el('li', {}, [
             el('button', {
                 type: 'button',
@@ -330,7 +356,7 @@ function renderPageTabs() {
             }, [
                 el('span', { class: 'page-tabs__dot' }),
                 `${t('store.page.short', { current: page.number })}`,
-                done ? ' ✓' : '',
+                locked ? ' 🔒' : done ? ' ✓' : '',
             ]),
         ]);
         return item;
@@ -353,20 +379,39 @@ function renderLocations() {
     const locked = !model.pageUnlocked(page.number);
     const rows = page.slots.map((slot) => {
         const kind = slot.kind ?? 'unknown';
-        const label = kindLabel(kind);
-        const tooltip = store.isConnected
-            ? `${store.locationName(slot.id)}${store.scoutedNames?.[slot.id] ? ` - ${store.scoutedNames[slot.id]}` : ''}`
-            : `Location ${slot.id}`;
+        // A locked row shows no category at all: not the real one, not a placeholder.
+        const label = locked ? '' : kindLabel(kind);
+        // A locked page shows neither the item name nor what kind of item it is.
+        const tooltip = locked
+            ? t('store.need.unlock', { page: page.number })
+            : store.isConnected
+                ? `${store.locationName(slot.id)}${store.scoutedNames?.[slot.id] ? ` - ${store.scoutedNames[slot.id]}` : ''}`
+                : `Location ${slot.id}`;
+        const selectable = !locked && !slot.bought;
         const state = slot.bought
             ? { text: t('store.bought'), cls: 'location__state--bought' }
             : locked
                 ? { text: t('store.locked'), cls: '' }
-                : { text: t('store.buy'), cls: 'location__state--open' };
-        return el('li', { class: `location${slot.bought ? ' location--bought' : ''}${locked && !slot.bought ? ' location--locked' : ''}` }, [
+                : { text: t('store.select.row'), cls: 'location__state--open' };
+        const tick = el('input', {
+            type: 'checkbox',
+            class: 'location__check',
+            'aria-label': t('store.select.row'),
+            checked: slot.selected && selectable,
+            disabled: !selectable,
+            onchange: (event) => {
+                model.setSelected(slot.id, event.target.checked, page.number);
+            },
+        });
+        return el('li', {
+            class: `location${slot.bought ? ' location--bought' : ''}${locked && !slot.bought ? ' location--locked' : ''}`
+                + `${slot.selected && selectable ? ' location--selected' : ''}`,
+        }, [
+            el('label', { class: 'location__pick' }, [tick]),
             el('span', { class: 'location__index', text: String(slot.index) }),
-            el('span', { class: 'location__name', title: tooltip }, [
-                el('span', { class: `location__kind location__kind--${kind}`, text: label }),
-            ]),
+            el('span', { class: 'location__name', title: tooltip }, label
+                ? [el('span', { class: `location__kind location__kind--${kind}`, text: label })]
+                : [el('span', { class: 'location__hidden', text: '—' })]),
             el('span', {
                 class: 'location__price',
                 title: model.taxSteps > 0 ? t('store.price.taxed') : undefined,
@@ -408,13 +453,19 @@ function renderStoreControls() {
         setStoreMessage(t('store.all.done'), 'ok');
         return;
     }
-    const check = model.canBuy(model.page, store.energy);
+    const count = model.selectedCount;
+    const check = model.canBuySelection(store.energy, model.page);
     dom.buyButton.disabled = !check.ok || store.buying;
-    dom.buyButton.textContent = check.ok
-        ? `${t('store.buy')} · ${formatEnergy(check.price, model.locale)}`
+    dom.buyButton.textContent = count > 0
+        ? t('store.buy.count', { count })
         : t('store.buy');
     if (!check.ok && store.isConnected) {
         setStoreMessage(reasonText(check), check.reason === 'insufficient' ? 'warn' : '');
+    } else if (check.ok && count > 0) {
+        setStoreMessage(t('store.selection.cost', {
+            count,
+            total: formatEnergy(check.cost, model.locale),
+        }));
     }
 }
 
@@ -497,8 +548,10 @@ function buildConsole() {
             return model.pages
                 .map((page) => {
                     const locked = !model.pageUnlocked(page.number);
+                    const picked = page.slots.filter((slot) => slot.selected && !slot.bought).length;
                     return `${page.number}: ${page.bought}/${page.total} · ${formatEnergy(page.price, model.locale)}`
-                        + `${locked ? ' (locked)' : ''}`;
+                        + `${locked ? ` (${t('store.locked')})` : ''}`
+                        + `${picked > 0 ? ` [${t('store.selected', { count: picked })}]` : ''}`;
                 })
                 .join('\n');
         },
@@ -507,16 +560,72 @@ function buildConsole() {
                 return t('error.no.store');
             }
             const page = model.currentPage;
+            const open = model.pageUnlocked(page.number);
             return page.slots
-                .map((slot) => `${slot.index}. ${kindLabel(slot.kind)}`
-                    + ` (${store.locationName(slot.id)})`
-                    + ` - ${slot.bought ? t('store.bought') : formatEnergy(page.price, model.locale)}`)
+                .map((slot) => {
+                    // a locked page tells nothing about its items
+                    const label = open ? kindLabel(slot.kind) : t('store.kind.hidden');
+                    const name = open ? ` (${store.locationName(slot.id)})` : '';
+                    return `${slot.index}. ${label}${name}`
+                        + ` - ${slot.bought ? t('store.bought') : formatEnergy(page.price, model.locale)}`;
+                })
                 .join('\n');
+        },
+        select: (args) => {
+            if (!model.hasData) {
+                return t('error.no.store');
+            }
+            const page = model.currentPage;
+            const what = (args[0] ?? '').toLowerCase();
+            if (what === 'none' || what === 'clear') {
+                model.clearSelection();
+                render();
+                return t('store.select.none');
+            }
+            if (what === 'all') {
+                let missed = 0;
+                for (const slot of page.slots) {
+                    if (slot.bought || !model.pageUnlocked(page.number)) {
+                        continue;
+                    }
+                    if (model.setSelected(slot.id, true, page.number)) {
+                        continue;
+                    }
+                    missed += 1;
+                }
+                render();
+                return t('store.selected', { count: model.selectedCount });
+            }
+            const position = Number.parseInt(args[0] ?? '', 10);
+            if (!Number.isFinite(position)) {
+                return t('console.bad.args');
+            }
+            const slot = model.locationAt(position);
+            if (!slot) {
+                return t('console.bad.args');
+            }
+            if (!model.toggleSelected(slot.id, page.number)) {
+                return t('store.select.failed');
+            }
+            render();
+            return t('store.selected', { count: model.selectedCount });
+        },
+        unlock: () => {
+            if (!model.hasData) {
+                return t('error.no.store');
+            }
+            const open = [...model.unlocked].sort((a, b) => a - b);
+            return t('store.unlock.state', {
+                mode: store.config?.unlockMode ?? 'page',
+                open: open.length ? open.join(', ') : '-',
+                locked: model.lockedPages.length ? model.lockedPages.join(', ') : '-',
+            });
         },
         buy: async (args) => {
             if (!store.isConnected || !model.hasData) {
                 return t('console.need.connection');
             }
+            const page = model.currentPage;
             const position = Number.parseInt(args[0] ?? '', 10);
             if (Number.isFinite(position)) {
                 const slot = model.locationAt(position);
@@ -526,24 +635,14 @@ function buildConsole() {
                 if (slot.bought) {
                     return t('store.owned');
                 }
-                const check = model.canBuy(model.page, store.energy);
-                if (!check.ok) {
-                    return reasonText(check);
+                if (!model.pageUnlocked(page.number)) {
+                    return t('store.need.unlock', { page: page.number });
                 }
-                const result = await store.buyLocation(slot.id, check.price);
-                if (result.ok) {
-                    model.setChecked([slot.id]);
-                    model.showFirstOpenPage();
-                    render();
-                    return t('store.purchase.ok', {
-                        location: store.locationName(slot.id),
-                        price: formatEnergy(check.price, model.locale),
-                    });
-                }
-                return t('store.purchase.failed', { reason: reasonText(result) });
+                model.setSelected(slot.id, true, page.number);
             }
-            await buyCurrent();
-            return '';
+            await buySelection();
+            const done = model.selectedCount === 0 && !store.buying;
+            return done ? '' : t('store.select.none');
         },
         lang: async (args) => {
             const code = args[0];
@@ -628,6 +727,20 @@ function bindStoreEvents() {
         }
         // a tax trap raises the prices of the open pages for good
         model.setTaxSteps(store.taxSteps);
+        // an unlock item opens its page: rebuild the pages and ask the server what is in the
+        // locations that just became visible
+        if (model.hasData) {
+            const opened = store.unlockedPages.filter((page) => !model.unlocked.has(page));
+            model.setUnlocked(store.unlockedPages);
+            if (opened.length > 0) {
+                void scoutStore();
+            }
+        }
+        for (const name of detail.last ?? []) {
+            if (isUnlockItem(name)) {
+                consoleUi?.write(t('log.items.unlock', { item: name }), 'info');
+            }
+        }
         render();
     });
     store.addEventListener('trap', (event) => {
@@ -677,7 +790,7 @@ function bindUiEvents() {
         });
     });
     dom.disconnectButton.addEventListener('click', () => disconnect());
-    dom.buyButton.addEventListener('click', () => void buyCurrent());
+    dom.buyButton.addEventListener('click', () => void buySelection());
     dom.prevButton.addEventListener('click', () => {
         model.previousPage();
         render();

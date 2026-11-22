@@ -18,11 +18,6 @@ export const CONNECTION_STATE = {
     connected: 'connected',
 };
 
-/** True for the two trap items of this world. */
-function isTrapItem(name) {
-    return name === 'Tax Trap' || name === 'Inflation Trap';
-}
-
 /** A refused login (bad slot, password, game) means the socket worked. */
 function isServerRefusal(error) {
     return Array.isArray(error?.errors) && error.errors.length > 0;
@@ -56,14 +51,16 @@ export class EnergyLinkStore extends EventTarget {
         this.energyKnown = false;
         this.energyKey = '';
         this.buying = false;
-        this.received = [];
+        // every item this slot received, newest last; the location id makes them distinct
+        this.receivedItems = [];
+        // Derived from the items this slot has received, so a reconnect recomputes the same numbers.
         this.trapEffects = { tax: 0, inflation: 0 };
+        // How many Inflation Traps already took their joules out of the pool. Persisted, because
+        // burning is a server write and must never happen twice for the same item.
+        this.inflationBurned = 0;
         // locationId -> 'progression' | 'useful' | 'trap' | 'filler', filled by scouting
         this.scouted = {};
         this.scoutedNames = {};
-        // locationId -> true once its trap was applied. A trap can arrive twice (bought here and
-        // placed elsewhere), the location id is what keeps it from counting double.
-        this.trapFired = new Map();
         this._bind();
     }
 
@@ -109,9 +106,7 @@ export class EnergyLinkStore extends EventTarget {
             this.log('chat', text);
         });
         this.client.items.on('itemsReceived', (items, startingIndex) => {
-            // startingIndex 0 means "here is everything you ever got", which happens on connect:
-            // those traps were applied in an earlier session and must not fire again.
-            this._onItemsReceived(items, startingIndex, startingIndex === 0);
+            this._onItemsReceived(items, startingIndex);
         });
     }
 
@@ -120,111 +115,112 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Counts the items of this slot and fires traps that arrive from other worlds.
+     * Counts the items of this slot and applies the traps among them.
      *
-     * A reconnect replays every item with startingIndex 0. Those are already applied, so the
-     * replay only restores the counters. The location-id map in applyTrapFromLocation would
-     * catch it too, but it is per session and the replay must not burn the pool again.
+     * The received item list is the source of truth: the server sends the same list on every
+     * login (starting at index 0), so counting it always gives the same numbers and a reconnect
+     * changes nothing. Only what is *new* since the last look has an effect.
+     *
+     * Inflation is the exception that needs care, because burning joules is a write to the
+     * server. `this.inflationBurned` holds the amount it already burnt; the difference between the
+     * item count and that number is what still has to go, and it is burnt exactly once.
+     *
+     * A trap therefore fires when its item arrives, whichever store the location belongs to:
+     * the item of a location you buy is delivered to whoever it belongs to, including yourself.
      */
-    _onItemsReceived(items, startingIndex, replay = false) {
-        if (startingIndex === 0) {
-            this.received = [];
+    _onItemsReceived(items, startingIndex) {
+        // Index 0 means "here is everything you ever got", which the server sends on every login.
+        // Those items are not news, so they must not be reported as freshly received again.
+        const replay = startingIndex === 0;
+        if (replay) {
+            this.receivedItems = [];
         }
         const fresh = [];
         for (const item of items) {
-            const name = item.name ?? '';
-            this.received.push(name);
-            fresh.push(name);
+            this.receivedItems.push(item);
+            if (!replay) {
+                fresh.push(item.name ?? '');
+            }
         }
 
-        // A trap can be placed in another player's world. Buying that location sends the item
-        // here, and that is the moment it has to take effect. On a replay they already fired.
-        const incoming = items.filter((item) => isTrapItem(item.name ?? ''));
-        if (incoming.length > 0) {
-            if (replay) {
-                this._restoreTrapCounters(incoming);
-            } else {
-                void this._applyIncomingTraps(incoming);
-            }
+        const taxCount = this._trapLocations('Tax Trap').size;
+        const inflationCount = this._trapLocations('Inflation Trap').size;
+        const previous = { ...this.trapEffects };
+        this.trapEffects.tax = taxCount;
+        this.trapEffects.inflation = inflationCount;
+
+        if (this.trapEffects.tax > previous.tax) {
+            this.emit('trap', {
+                kind: 'tax',
+                count: this.trapEffects.tax - previous.tax,
+                percent: Math.round((this.config?.taxPerTrap ?? 0) * 100),
+                factor: this.inflationFactor,
+            });
+        }
+
+        const pending = inflationCount - this.inflationBurned;
+        if (pending > 0) {
+            void this._applyInflationTrap(pending);
+        } else if (this.inflationBurned > inflationCount) {
+            // The server knows fewer traps than we burnt (regenerated room, different slot data).
+            // Trust the list and forget the surplus instead of keeping a debt.
+            this.inflationBurned = inflationCount;
+            this._saveTrapState();
         }
 
         this.emit('items', {
             mcguffins: this.countItem(this.config?.mcguffinItem ?? 'McGuffin'),
             traps: { ...this.trapEffects },
+            unlockedPages: this.unlockedPages,
             last: fresh,
         });
     }
 
-    /** Counters for traps that were already applied before (reconnect replay). */
-    _restoreTrapCounters(items) {
-        for (const item of items) {
-            const locationId = item.locationId ?? item.location ?? null;
-            if (locationId !== null) {
-                this.trapFired.set(locationId, item.name === 'Tax Trap' ? 'tax' : 'inflation');
-            }
-        }
-        this._syncTrapCounters();
-        this._saveTrapState();
-    }
-
-    /** Traps that arrived from other worlds, deduplicated by their location id. */
-    async _applyIncomingTraps(items) {
-        for (const item of items) {
-            const locationId = item.locationId ?? item.location ?? null;
-            if (locationId === null) {
-                continue;
-            }
-            // The effect is decided by the item that really arrived, not by our scout data:
-            // in another player's world the same location holds a different item.
-            const name = item.name ?? '';
-            this.scoutedNames = this.scoutedNames ?? {};
-            this.scoutedNames[locationId] = name;
-            await this.applyTrapFromLocation(locationId);
-        }
-        this.emit('items', {
-            mcguffins: this.countItem(this.config?.mcguffinItem ?? 'McGuffin'),
-            traps: { ...this.trapEffects },
-            last: [],
-        });
-    }
-
     /**
-     * Applies the trap that sits in a location and returns what happened, or null.
+     * Pages that are open, derived from the items received so far.
      *
-     * There are two ways a trap of this store reaches the player:
-     *   1. you buy the location in this store  -> buyLocation calls this
-     *   2. another player buys it in their world and the item is sent here -> item event
-     * Both go through this method, and the location id makes sure the effect happens only once,
-     * because the item and the purchase describe the same location.
+     * Page 1 is always open, it has no unlock item. For the rest:
+     * "page" mode: the item "Store Page <n>" opens page n, nothing else.
+     * "progressive" mode: the item is handed out once per page after the first, so the nth copy
+     * opens page n+1.
+     *
+     * The list of received items is complete on every login, so this survives a reconnect without
+     * any extra bookkeeping.
      */
-    async applyTrapFromLocation(locationId) {
-        const name = this.scoutedNames?.[locationId];
-        if (!name || !isTrapItem(name)) {
-            return null;
+    get unlockedPages() {
+        const config = this.config;
+        if (!config) {
+            return [];
         }
-        const already = this.trapFired.get(locationId);
-        if (already) {
-            return { kind: already, count: 0, duplicate: true };
+        const total = Number(config.pages) || 0;
+        const pages = new Set();
+        if (total >= 1) {
+            pages.add(1);
         }
-        this.trapFired.set(locationId, name === 'Tax Trap' ? 'tax' : 'inflation');
-        this._saveTrapState();
-        if (name === 'Tax Trap') {
-            this.trapEffects.tax += 1;
-            const detail = {
-                kind: 'tax',
-                count: 1,
-                percent: Math.round((this.config?.taxPerTrap ?? 0) * 100),
-                factor: this.inflationFactor,
-            };
-            this.emit('trap', detail);
-            return detail;
+        const names = this.receivedItems.map((item) => item.name ?? '');
+        if (config.unlockMode === 'progressive') {
+            const count = names.filter((name) => name === config.unlockItem).length;
+            for (let page = 2; page <= Math.min(count + 1, total); page += 1) {
+                pages.add(page);
+            }
+        } else {
+            const prefix = config.unlockItemPrefix;
+            for (const name of names) {
+                if (!name.startsWith(prefix)) {
+                    continue;
+                }
+                const number = Number.parseInt(name.slice(prefix.length).trim(), 10);
+                if (Number.isFinite(number) && number >= 2 && number <= total) {
+                    pages.add(number);
+                }
+            }
         }
-        if (name === 'Inflation Trap') {
-            this.trapEffects.inflation += 1;
-            await this._applyInflationTrap(1);
-            return { kind: 'inflation', count: 1 };
-        }
-        return null;
+        return [...pages].sort((a, b) => a - b);
+    }
+
+    /** True when the page's unlock item has arrived. */
+    pageUnlocked(pageNumber) {
+        return this.unlockedPages.includes(Number(pageNumber));
     }
 
     /**
@@ -238,6 +234,10 @@ export class EnergyLinkStore extends EventTarget {
         }
         const key = this.energyKey || `EnergyLink${this.team}`;
         const percent = Math.min(100, share * 100 * count);
+        // Count the traps as burnt before writing, so a second item event that arrives while the
+        // request is in flight cannot burn the same trap again.
+        this.inflationBurned += count;
+        this._saveTrapState();
         try {
             const packet = await this._setStorage(key, [
                 { operation: 'mul', value: Math.max(0, 1 - share * count) },
@@ -255,12 +255,35 @@ export class EnergyLinkStore extends EventTarget {
                 energy: value,
             });
         } catch (error) {
+            // Nothing was burnt, so let the next items event try again.
+            this.inflationBurned = Math.max(0, this.inflationBurned - count);
+            this._saveTrapState();
             this.log('warn', t('log.trap.failed', { error: error.message }));
         }
     }
 
+    /**
+     * Distinct locations among the received items of the given trap.
+     *
+     * An item of the multiworld is unique per location: one location yields exactly one item, no
+     * matter how often the server sends the list. Counting locations instead of items keeps a
+     * trap from being applied twice if the same entry is delivered again, and makes a reconnect
+     * (which replays the whole list) harmless.
+     */
+    _trapLocations(name) {
+        const locations = new Set();
+        for (const item of this.receivedItems) {
+            if ((item.name ?? '') !== name) {
+                continue;
+            }
+            const locationId = item.locationId ?? item.location ?? null;
+            locations.add(locationId === null ? `item:${locations.size}` : `loc:${locationId}`);
+        }
+        return locations;
+    }
+
     countItem(name) {
-        return this.received.filter((item) => item === name).length;
+        return this.receivedItems.filter((item) => (item.name ?? '') === name).length;
     }
 
     /** Number of tax traps received so far; the model turns it into prices. */
@@ -278,24 +301,27 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Traps that already took effect, per server and slot. The server does not resend items on a
-     * reconnect, so without this every reload would forget the tax factor and could burn the pool
-     * a second time for a trap that was already applied.
+     * How many Inflation Traps of this slot already burnt joules, per server and slot.
+     *
+     * The tax counter does not need this: it is a plain function of the received items and a
+     * reconnect recomputes it. Burning is different, it writes to the shared pool. The item list
+     * tells how many traps there are, this number tells how many of them are done, and only the
+     * difference is still burnt.
      */
     _trapStorageKey() {
         return `ap-store.traps.${this.url}.${this.slotName}`;
     }
 
     _loadTrapState() {
+        this.inflationBurned = 0;
         try {
             const raw = localStorage.getItem(this._trapStorageKey());
             if (!raw) {
                 return;
             }
             const data = JSON.parse(raw);
-            for (const [locationId, kind] of Object.entries(data.fired ?? {})) {
-                this.trapFired.set(Number(locationId), kind);
-            }
+            const burnt = Number(data.inflationBurned);
+            this.inflationBurned = Number.isFinite(burnt) && burnt > 0 ? Math.floor(burnt) : 0;
         } catch {
             // a broken entry only means a trap could fire twice, not worth failing over
         }
@@ -304,17 +330,11 @@ export class EnergyLinkStore extends EventTarget {
     _saveTrapState() {
         try {
             localStorage.setItem(this._trapStorageKey(), JSON.stringify({
-                fired: Object.fromEntries(this.trapFired),
+                inflationBurned: this.inflationBurned,
             }));
         } catch {
             // storage may be blocked; the run still works, a reload just forgets the traps
         }
-    }
-
-    _syncTrapCounters() {
-        const kinds = [...this.trapFired.values()];
-        this.trapEffects.tax = kinds.filter((k) => k === 'tax').length;
-        this.trapEffects.inflation = kinds.filter((k) => k === 'inflation').length;
     }
 
     /* The game name per server+slot, so a reconnect does not need the TextOnly probe again. */
@@ -455,6 +475,10 @@ export class EnergyLinkStore extends EventTarget {
         // checks from a client without one. A cached name saves the extra join/part the probe
         // causes, but the cache can be stale: the room may have been regenerated with a
         // different game for this slot. So a refused login is retried once with a fresh probe.
+        // The burnt counter has to be known before the login: the server replays the item list
+        // right after it, and that replay must not burn the pool again.
+        this._loadTrapState();
+
         let game = this._cachedGame();
         if (game) {
             this.log('debug', t('log.slot.game.cached', { slot: this.slotName, game }));
@@ -486,9 +510,6 @@ export class EnergyLinkStore extends EventTarget {
 
         this.game = this.client.game || game;
         this.slot = this.client.players.self.slot;
-        this.trapFired = new Map();
-        this._loadTrapState();
-        this._syncTrapCounters();
         this.team = this.client.players.self.team ?? 0;
         this.state = CONNECTION_STATE.connected;
 
@@ -659,20 +680,40 @@ export class EnergyLinkStore extends EventTarget {
         return packet;
     }
 
-    /**
-     * Buys a location: pay the price via EnergyLink, then report the location as checked.
-     * Returns { ok, reason, energy, location }.
-     */
+    /** Buys one location. Kept for the console and for callers that buy a single row. */
     async buyLocation(locationId, price) {
+        return this.buyLocations([locationId], price);
+    }
+
+    /**
+     * Buys several locations at once: charges the sum once, then reports the locations as checked.
+     *
+     * The charge is a single storage operation, so either the whole sum is paid or nothing is. The
+     * checks follow one by one; if one of them fails the rest is still checked, because the joules
+     * are already gone. The result lists what went through, so the caller can show a partial
+     * purchase instead of pretending it was all or nothing.
+     *
+     * Returns { ok, reason, energy, locations, price, charged, checked }.
+     */
+    async buyLocations(locationIds, price) {
         if (!this.isConnected) {
             return { ok: false, reason: 'not connected' };
+        }
+        const ids = [...new Set((locationIds ?? []).map(Number).filter((id) => Number.isFinite(id)))];
+        if (ids.length === 0) {
+            return { ok: false, reason: 'no selection' };
         }
         if (this.buying) {
             return { ok: false, reason: 'busy' };
         }
-        if (this.checkedLocationIds().has(locationId)) {
+        const already = this.checkedLocationIds();
+        const fresh = ids.filter((id) => !already.has(id));
+        if (fresh.length === 0) {
             return { ok: false, reason: 'already checked' };
         }
+        // A caller that only asks for part of the list should pay for part of the list.
+        const cost = fresh.length === ids.length ? price : Math.round(price * (fresh.length / ids.length));
+
         this.buying = true;
         const key = this.energyKey || `EnergyLink${this.team}`;
         let charged = 0;
@@ -681,13 +722,13 @@ export class EnergyLinkStore extends EventTarget {
             if (!this.energyKnown) {
                 balance = await this.refreshEnergy(true);
             }
-            if (balance < price) {
+            if (balance < cost) {
                 return { ok: false, reason: 'insufficient', energy: balance };
             }
 
             // Charge first, so two clients cannot buy the same joules at once.
             const packet = await this._setStorage(key, [
-                { operation: 'add', value: -price },
+                { operation: 'add', value: -cost },
                 { operation: 'max', value: 0 },
             ]);
             const before = Math.round(Number(packet.original_value) || 0);
@@ -695,7 +736,7 @@ export class EnergyLinkStore extends EventTarget {
             charged = before - after;
             this._setEnergy(after);
 
-            if (charged !== price) {
+            if (charged !== cost) {
                 // Someone else changed the value in between; do not keep a partial charge.
                 if (charged > 0) {
                     await this._setStorage(key, [{ operation: 'add', value: charged }]).catch(() => {});
@@ -704,12 +745,35 @@ export class EnergyLinkStore extends EventTarget {
                 return { ok: false, reason: 'race', energy: before, charged };
             }
 
-            // Read the trap before checking: the scout data is there as soon as the page is shown.
-            const trap = await this.applyTrapFromLocation(locationId);
-
-            this.client.check(locationId);
-            this.emit('locations', { checked: [locationId] });
-            return { ok: true, energy: after, location: locationId, price, charged, trap };
+            // Checking makes the server deliver each location's item to whoever it belongs to,
+            // which is the only place traps are applied (see _onItemsReceived).
+            const checked = [];
+            let failure = null;
+            for (const id of fresh) {
+                try {
+                    this.client.check(id);
+                    checked.push(id);
+                } catch (error) {
+                    failure = error;
+                }
+            }
+            if (checked.length > 0) {
+                this.emit('locations', { checked });
+            }
+            if (checked.length === 0) {
+                // Nothing was checked, so give the joules back.
+                await this._setStorage(key, [{ operation: 'add', value: charged }]).catch(() => {});
+                this._setEnergy(Math.round(Number(before)));
+                return { ok: false, reason: 'error', error: failure?.message ?? 'check failed', charged: 0 };
+            }
+            return {
+                ok: checked.length === fresh.length,
+                reason: checked.length === fresh.length ? undefined : 'partial',
+                energy: after,
+                locations: checked,
+                price: cost,
+                charged,
+            };
         } catch (error) {
             if (charged > 0) {
                 try {

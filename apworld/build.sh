@@ -1,5 +1,5 @@
 #!/bin/sh
-# Packt apworld/energylink_store zu apworld/energylink_store.apworld (Zip mit Ordner gleichen Namens).
+# Packs apworld/energylink_store into apworld/energylink_store.apworld (a zip with a folder of the same name).
 set -e
 cd "$(dirname "$0")"
 rm -f energylink_store.apworld

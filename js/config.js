@@ -3,6 +3,9 @@
 // Contract with the APWorld (keys in slot_data, all optional):
 //   progress_items      number of progress pages         (default 5)
 //   locations_per_page  locations per page, 5..10        (default 5)
+//   unlock_mode         "page" | "progressive"           (default "page")
+//   unlock_item         item name for the progressive mode
+//   unlock_item_prefix  name prefix for the page mode     (default "Store Page ")
 //   base_price          price of a page 1 location in J  (default 1e6)
 //   price_step          added to the price per page      (default 1e6)
 //   energylink_key      override for the EnergyLink key  (default EnergyLink{team})
@@ -28,6 +31,9 @@ const ALIASES = {
     basePrice: ['base_price', 'basePrice', 'price_base', 'starting_price'],
     priceStep: ['price_step', 'priceStep', 'price_increase', 'price_per_page'],
     energyLinkKey: ['energylink_key', 'energy_link_key', 'energylinkKey'],
+    unlockMode: ['unlock_mode', 'store_unlock_mode', 'unlockMode'],
+    unlockItem: ['unlock_item', 'progressive_unlock_item', 'unlockItem'],
+    unlockItemPrefix: ['unlock_item_prefix', 'page_unlock_prefix', 'unlockItemPrefix'],
     mcguffins: ['mcguffins_required', 'mcguffin_count', 'goal_items', 'mcguffins'],
     mcguffinItem: ['mcguffin_name', 'mcguffin_item', 'goal_item_name'],
     fillerJoules: ['filler_joules', 'filler_value', 'filler_joule'],
@@ -53,6 +59,11 @@ export function defaultConfig() {
         basePrice: LIMITS.basePrice.fallback,
         priceStep: LIMITS.priceStep.fallback,
         energyLinkKey: null,
+        // "page": the item "Store Page <n>" opens page n
+        // "progressive": the nth copy of one item opens page n
+        unlockMode: 'page',
+        unlockItem: 'Progressive Store Unlock',
+        unlockItemPrefix: 'Store Page ',
         mcguffins: 0,
         mcguffinItem: 'McGuffin',
         fillerJoules: 0,
@@ -112,6 +123,29 @@ export function parseConfig(slotData, { game, team } = {}) {
         const parsed = toFloat(priceStep, LIMITS.priceStep.fallback);
         config.priceStep = Math.round(parsed);
         config.source = 'slot_data';
+    }
+
+    const unlockMode = pick(source, ALIASES.unlockMode);
+    if (unlockMode !== undefined) {
+        const text = String(unlockMode).trim().toLowerCase();
+        if (text === 'progressive' || text === '1') {
+            config.unlockMode = 'progressive';
+        } else if (text === 'page' || text === '0' || text === 'pages') {
+            config.unlockMode = 'page';
+        } else {
+            warnings.push(`unknown unlock_mode ${unlockMode}, using ${config.unlockMode}`);
+        }
+        config.source = 'slot_data';
+    }
+
+    const unlockItem = pick(source, ALIASES.unlockItem);
+    if (typeof unlockItem === 'string' && unlockItem.trim() !== '') {
+        config.unlockItem = unlockItem.trim();
+    }
+
+    const unlockPrefix = pick(source, ALIASES.unlockItemPrefix);
+    if (typeof unlockPrefix === 'string' && unlockPrefix.trim() !== '') {
+        config.unlockItemPrefix = unlockPrefix.trim();
     }
 
     const mcguffins = pick(source, ALIASES.mcguffins);

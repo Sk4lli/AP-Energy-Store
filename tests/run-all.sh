@@ -12,9 +12,19 @@ if ! curl -s -o /dev/null "${URL}/index.html"; then
 fi
 
 fail=0
-for suite in unit.test browser.test page-auto trap-on-buy trap-both-ways protocol-fallback cache-stale file-protocol; do
+for suite in unit.test browser.test page-auto unlock multi-buy trap-on-buy trap-both-ways \
+             trap-other-player protocol-fallback cache-stale file-protocol; do
+    # trap-other-player needs the bought items to belong to another slot
+    # Page 1 is always open, pages 2 and 3 wait for their unlock item.
+    extra=""
+    case "$suite" in
+        # These suites do arithmetic on prices and the balance, so no trap may change either.
+        multi-buy|page-auto|browser.test) extra="--no-traps" ;;
+        trap-other-player) extra="--items-to-other 2" ;;
+    esac
+    # shellcheck disable=SC2086
     node tests/mock-server.mjs --port "$PORT" --slot Tester --game "Test World" \
-        --energy 10000000 --pages 3 --perpage 5 >/tmp/ap-store-mock.log 2>&1 &
+        --energy 10000000 --pages 3 --perpage 5 $extra >/tmp/ap-store-mock.log 2>&1 &
     mock_pid=$!
     sleep 1
     printf '%-20s ' "$suite"

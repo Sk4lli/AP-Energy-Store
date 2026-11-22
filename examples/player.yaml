@@ -1,37 +1,47 @@
-# Player-YAML Beispiel für den Energylink Store.
+# Example player YAML for the Energylink Store.
 #
-# Die Optionen gehören unter den Spielnamen "Energylink Store". Fehlen sie,
-# nutzt die World ihre Standardwerte (5 Seiten, 5 Locations je Seite, 1 MJ
-# Basispreis, 1 MJ Aufschlag, 50 McGuffins, 15 % Traps).
+# The options belong under the game name "Energylink Store". If an option is
+# missing, the world uses its default (5 pages, 5 locations per page, 1 MJ base
+# price, 1 MJ step, 50 McGuffins, 15 % traps).
 
 name: Tester
 game: Energylink Store
 
 Energylink Store:
-  # Anzahl der Store-Seiten (1 bis 20)
+  # Number of store pages (1 to 20)
   progress_pages: 5
 
-  # Locations je Seite (5 bis 10)
+  # Locations per page (5 to 10)
   locations_per_page: 8
 
-  # Preis einer Location auf Seite 1, in Joule
-  base_price: 750000
+  # How the pages are unlocked (page 1 is always open):
+  #   page        - every further page has its own item ("Store Page 2", "Store Page 3", ...)
+  #   progressive - one item for all, the first copy unlocks page 2, the second page 3, ...
 
-  # Aufschlag pro Seite, in Joule
-  # Seite 1: 750k, Seite 2: 2,25M, Seite 3: 3,75M, ...
-  price_step: 1500000
+  unlock_mode: page
 
-  # Wie viele McGuffins zum Sieg nötig sind
+  # Price of one location on page 1, in joules
+  # Short forms are allowed: k, m, g, t -- so 750k instead of 750000
+  base_price: 750k
+
+  # Added to the price per page, in joules
+  # Page 1: 750k, page 2: 2.25M, page 3: 3.75M, ...
+  price_step: 1.5m
+
+  # Shown value of a filler item, prefixes work here too (500k, 1m)
+  filler_joules: 0
+
+  # How many McGuffins are needed to win
   mcguffins_required: 50
 
-  # Anteil der Filler-Plätze, die zu Traps werden (0 bis 100)
+  # Share of the filler slots that turn into traps (0 to 100)
   trap_percentage: 15
 
-  # Steuer-Trap: hebt alle Preise dauerhaft an, in Prozent pro Trap
+  # Tax Trap: raises every price permanently, in percent per trap
   tax_trap: true
   tax_per_trap: 10
 
-  # Inflation-Trap: verbrennt einen Teil des EnergyLink-Speichers,
-  # in Prozent des aktuellen Stands pro Trap
+  # Inflation Trap: burns part of the EnergyLink pool,
+  # in percent of the current balance per trap
   inflation_trap: true
   inflation_per_trap: 20

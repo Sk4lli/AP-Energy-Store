@@ -48,6 +48,9 @@ for (let i = 0; i < 4; i += 1) {
         bought: window.energylinkStore.model.currentPage.bought,
         name: window.energylinkStore.store.scoutedNames[window.energylinkStore.model.currentPage.slots.find((s) => !s.bought)?.id],
     }));
+    // select the row, then buy the selection (the store buys what is ticked)
+    await p.evaluate((n) => window.energylinkStore.model.setSelected(
+        window.energylinkStore.model.locationAt(n).id, true), i + 1);
     const result = await p.evaluate(() => window.energylinkStore.console().run('buy'));
     await p.waitForFunction((n) => window.energylinkStore.model.currentPage.bought > n, before.bought, { timeout: 10000 }).catch(() => {});
     await p.waitForTimeout(1200);

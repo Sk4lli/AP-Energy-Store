@@ -25,14 +25,18 @@ import typing
 from BaseClasses import Item, ItemClassification, Location, Region, Tutorial
 from worlds.AutoWorld import WebWorld, World
 
+from .Joules import format_joules
 from .Items import (
     FILLER_ITEM,
     INFLATION_TRAP_ITEM,
     ITEM_CLASSIFICATIONS,
     MACGUFFIN_ITEM,
+    PAGE_UNLOCK_PREFIX,
+    PROGRESSIVE_UNLOCK_ITEM,
     TAX_TRAP_ITEM,
     item_groups,
     item_table,
+    page_unlock_item,
 )
 from .Locations import PAGE_REGION_NAME, location_groups, location_name, location_table
 from .Options import EnergylinkStoreOptions, option_groups
@@ -40,7 +44,7 @@ from .Options import EnergylinkStoreOptions, option_groups
 
 class EnergylinkStoreWeb(WebWorld):
     theme = "ocean"
-    game_info_languages = ["en", "de"]
+    game_info_languages = ["en"]
     tutorials = [
         Tutorial(
             "Multiworld Setup Guide",
@@ -48,14 +52,6 @@ class EnergylinkStoreWeb(WebWorld):
             "English",
             "setup/en_setup.md",
             "setup/en",
-            ["devx"],
-        ),
-        Tutorial(
-            "Multiworld Setup Guide",
-            "Anleitung, um den Energylink Store Client im Browser einzurichten.",
-            "Deutsch",
-            "setup/de_setup.md",
-            "setup/de",
             ["devx"],
         ),
     ]
@@ -88,15 +84,23 @@ class EnergylinkStoreWorld(World):
     page_count: int
     locations_per_page: int
     effective_mcguffins: int
+    unlock_mode: str
+    unlock_items: list[str]
 
     def generate_early(self) -> None:
         self.page_count = self.options.progress_pages.value
         self.locations_per_page = self.options.locations_per_page.value
 
-        # The world is unbeatable if it asks for more McGuffins than it has locations, so clamp.
-        available = self.page_count * self.locations_per_page
+        # Which items open the pages. "page" gives every page its own item, "progressive" hands out
+        # the same item repeatedly, page N opens with the Nth copy.
+        self.unlock_mode = "page" if self.options.unlock_mode.value == 0 else "progressive"
+        self.unlock_items = self._unlock_items()
+
+        # The world is unbeatable if it asks for more McGuffins than it has locations, so clamp. The
+        # unlock items are placed first and need their own locations, so they count as taken.
+        available = self.page_count * self.locations_per_page - len(self.unlock_items)
         wanted = self.options.mcguffins_required.value
-        self.effective_mcguffins = max(1, min(wanted, available))
+        self.effective_mcguffins = max(1, min(wanted, max(1, available)))
         if self.effective_mcguffins != wanted:
             logging.warning(
                 "Energylink Store (player %s): %s McGuffins requested but only %s locations available, "
@@ -108,6 +112,8 @@ class EnergylinkStoreWorld(World):
         menu = Region("Menu", player, self.multiworld)
         self.multiworld.regions.append(menu)
 
+        # Page 1 is always open. Every further page hangs on its own unlock item, so the fill can
+        # never place that item behind the page it opens -- that would make the seed unbeatable.
         for page in range(1, self.page_count + 1):
             region = Region(PAGE_REGION_NAME.format(page=page), player, self.multiworld)
             region.add_locations(
@@ -117,7 +123,22 @@ class EnergylinkStoreWorld(World):
                 },
                 EnergylinkStoreLocation,
             )
-            menu.connect(region)
+            if page == 1:
+                menu.connect(region)
+            elif self.unlock_mode == "progressive":
+                # Page 1 is free, so the first copy opens page 2: page n needs n-1 copies.
+                menu.connect(
+                    region,
+                    rule=lambda state, count=page - 1: state.has(PROGRESSIVE_UNLOCK_ITEM, player, count),
+                )
+            else:
+                # The client opens page n with "Store Page n", so that is what the rule uses. The
+                # chain is transitive: page n-1 needs "Store Page n-1", which cannot be found there.
+                needed = page_unlock_item(page)
+                menu.connect(
+                    region,
+                    rule=lambda state, item=needed: state.has(item, player),
+                )
             self.multiworld.regions.append(region)
 
         required = self.effective_mcguffins
@@ -136,8 +157,19 @@ class EnergylinkStoreWorld(World):
         total = len(self.multiworld.get_unfilled_locations(self.player))
         required = max(1, min(self.effective_mcguffins, total))
 
-        pool: list[Item] = [self._item(MACGUFFIN_ITEM) for _ in range(required)]
-        remaining = total - required
+        pool: list[Item] = [self._item(name) for name in self.unlock_items]
+        pool.extend(self._item(MACGUFFIN_ITEM) for _ in range(required))
+
+        remaining = total - len(pool)
+        if remaining < 0:
+            # More pages than locations can only happen with a tiny slot; drop the surplus unlocks
+            # rather than producing more items than there are locations.
+            logging.warning(
+                "Energylink Store (player %s): %s locations do not fit %s unlock items, "
+                "dropping the surplus.", self.player, total, len(self.unlock_items)
+            )
+            pool = pool[:total]
+            remaining = 0
 
         trap_chance = self.options.trap_percentage.value / 100
         trap_count = int(round(remaining * trap_chance)) if self._traps_enabled() else 0
@@ -148,6 +180,24 @@ class EnergylinkStoreWorld(World):
         while len(pool) < total:
             pool.append(self._item(FILLER_ITEM))
         self.multiworld.itempool.extend(pool[:total])
+
+    def unlock_item_for(self, page: int) -> str:
+        """Name of the item that opens ``page`` (page 1 is always open and has none)."""
+        if self.unlock_mode == "progressive":
+            return PROGRESSIVE_UNLOCK_ITEM
+        return page_unlock_item(page)
+
+    def _unlock_items(self) -> list[str]:
+        """Items that go into the pool so the pages after the first can open.
+
+        Page 1 is always open, so it has no unlock item at all.
+        """
+        if self.page_count < 2:
+            return []
+        if self.unlock_mode == "progressive":
+            # Page 1 is free, so page_count - 1 copies open the remaining pages.
+            return [PROGRESSIVE_UNLOCK_ITEM] * (self.page_count - 1)
+        return [page_unlock_item(page) for page in range(2, self.page_count + 1)]
 
     def _traps_enabled(self) -> bool:
         return bool(self.options.tax_trap.value or self.options.inflation_trap.value)
@@ -180,6 +230,12 @@ class EnergylinkStoreWorld(World):
         return {
             "progress_items": self.page_count,
             "locations_per_page": self.locations_per_page,
+            # how the client knows which pages an item opens:
+            #   "page"        -> item name "Store Page <n>" opens page n
+            #   "progressive" -> the nth copy of one item opens page n
+            "unlock_mode": self.unlock_mode,
+            "unlock_item": PROGRESSIVE_UNLOCK_ITEM,
+            "unlock_item_prefix": PAGE_UNLOCK_PREFIX,
             "base_price": self.options.base_price.value,
             "price_step": self.options.price_step.value,
             "mcguffins_required": self.effective_mcguffins,
@@ -196,8 +252,11 @@ class EnergylinkStoreWorld(World):
 
     def write_spoiler(self, spoiler_handle: typing.TextIO) -> None:
         spoiler_handle.write(
-            f"\nEnergylink Store: {self.page_count} pages x {self.locations_per_page} locations\n"
+            f"\nEnergylink Store: {self.page_count} pages x {self.locations_per_page} locations, "
+            f"unlock mode {self.unlock_mode}\n"
         )
         for page in range(1, self.page_count + 1):
             price = self.options.base_price.value + self.options.price_step.value * (page - 1)
-            spoiler_handle.write(f"  Page {page} ({price:,} J): {self.locations_per_page} locations\n")
+            spoiler_handle.write(
+                f"  Page {page} ({format_joules(price)}): {self.locations_per_page} locations\n"
+            )
