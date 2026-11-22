@@ -61,6 +61,10 @@ export class EnergyLinkStore extends EventTarget {
         // locationId -> 'progression' | 'useful' | 'trap' | 'filler', filled by scouting
         this.scouted = {};
         this.scoutedNames = {};
+        // locationId -> true for locations that were hinted. Only those may show the real item
+        // name: scouting and hints differ in what a race seed still reveals, and a name is only
+        // public once somebody hinted it.
+        this.hinted = new Set();
         this._bind();
     }
 
@@ -105,8 +109,16 @@ export class EnergyLinkStore extends EventTarget {
         this.client.messages.on('message', (text) => {
             this.log('chat', text);
         });
-        this.client.items.on('itemsReceived', (items, startingIndex) => {
+        // `items` and `hints` are the same module of the library: it emits both events.
+        const itemsModule = this.client.items;
+        itemsModule.on('itemsReceived', (items, startingIndex) => {
             this._onItemsReceived(items, startingIndex);
+        });
+        itemsModule.on('hintsInitialized', () => {
+            void this._readHints();
+        });
+        itemsModule.on('hintReceived', () => {
+            void this._readHints();
         });
     }
 
@@ -234,24 +246,39 @@ export class EnergyLinkStore extends EventTarget {
         }
         const key = this.energyKey || `EnergyLink${this.team}`;
         const percent = Math.min(100, share * 100 * count);
+
+        // The burn is charged with "add", not with "mul". Some servers restrict which storage
+        // operations a client may use (a patched 0.6.3 answers a mul with
+        // "AP_BLOCK_SET reason=operation_disabled" and the trap would silently do nothing), while
+        // "add" is what every client needs for the EnergyLink. So the amount is computed here from
+        // the current balance and added as a negative number.
+        const before = this.energyKnown ? this.energy : await this.refreshEnergy(true);
+        const burn = Math.min(before, Math.round((before * share * count)));
+        if (!(burn > 0)) {
+            // Nothing left to burn, the trap is spent.
+            this.inflationBurned += count;
+            this._saveTrapState();
+            this.emit('trap', { kind: 'inflation', count, percent: Math.round(percent), burned: 0, energy: before });
+            return;
+        }
+
         // Count the traps as burnt before writing, so a second item event that arrives while the
         // request is in flight cannot burn the same trap again.
         this.inflationBurned += count;
         this._saveTrapState();
         try {
             const packet = await this._setStorage(key, [
-                { operation: 'mul', value: Math.max(0, 1 - share * count) },
-                { operation: 'floor', value: null },
+                { operation: 'add', value: -burn },
                 { operation: 'max', value: 0 },
             ]);
-            const before = Math.round(Number(packet.original_value) || 0);
+            const previous = Math.round(Number(packet.original_value) || 0);
             const value = Math.round(Number(packet.value) || 0);
             this._setEnergy(value);
             this.emit('trap', {
                 kind: 'inflation',
                 count,
                 percent: Math.round(percent),
-                burned: before - value,
+                burned: previous - value,
                 energy: value,
             });
         } catch (error) {
@@ -519,6 +546,8 @@ export class EnergyLinkStore extends EventTarget {
 
         await this._loadPackage();
         await this.refreshEnergy(true);
+        // Hints arrive through a stored data read that starts with the login, so give it a moment.
+        setTimeout(() => this._readHints(), 1200);
 
         this.emit('state', {
             state: this.state,
@@ -618,6 +647,57 @@ export class EnergyLinkStore extends EventTarget {
         return result;
     }
 
+    /**
+     * Reads the hints of this slot: which locations are hinted, and what they hold.
+     *
+     * A hint is the only place where an item name is public. Scouting answers the same question but
+     * a race seed refuses it, while hints exist in every seed, so the category is taken from here.
+     * Nothing about a locked page is kept from hints -- the caller decides what to show.
+     */
+    async _readHints() {
+        if (!this.isConnected) {
+            return;
+        }
+        let hints = [];
+        try {
+            hints = this.client.items.hints ?? [];
+        } catch (error) {
+            this.log('debug', `hints unavailable: ${error?.message ?? error}`);
+            return;
+        }
+        if (!Array.isArray(hints) || hints.length === 0) {
+            return;
+        }
+        const classification = { ...this.scouted };
+        const names = { ...this.scoutedNames };
+        const hinted = new Set(this.hinted);
+        for (const hint of hints) {
+            const locationId = hint.item?.locationId ?? hint.locationId ?? null;
+            if (locationId === null) {
+                continue;
+            }
+            const kind = EnergyLinkStore.classificationOf(hint.item);
+            if (kind !== 'unknown') {
+                classification[locationId] = kind;
+            }
+            const name = hint.item?.name;
+            if (typeof name === 'string' && name !== '') {
+                names[locationId] = name;
+            }
+            hinted.add(locationId);
+        }
+        this.hinted = hinted;
+        this.scouted = classification;
+        this.scoutedNames = names;
+        this.emit('scouted', {
+            classification: this.scouted,
+            itemName: this.scoutedNames,
+            hinted: [...this.hinted],
+            count: hints.length,
+            source: 'hints',
+        });
+    }
+
     async _loadPackage() {
         try {
             await this.client.package.fetchPackage([this.game]);
@@ -665,9 +745,25 @@ export class EnergyLinkStore extends EventTarget {
         }
     }
 
-    /** Raw data storage write that returns the whole SetReply packet (value + original_value). */
+    /**
+     * Raw data storage write that returns the whole SetReply packet (value + original_value).
+     *
+     * A server that refuses the write (a patched server answers with
+     * "AP_BLOCK_SET reason=operation_disabled", the stock server with an InvalidPacket) throws
+     * instead of leaving the caller waiting: without the reply there is no proof the joules moved.
+     */
     async _setStorage(key, operations, defaultValue = 0) {
         const id = uuid();
+        // The socket has on/off/wait, no "once": the listener is removed by hand.
+        let onInvalid = null;
+        const refused = new Promise((_, reject) => {
+            onInvalid = (packet) => {
+                if (packet?.original_cmd === 'Set') {
+                    reject(new Error(packet.text || t('log.set.refused')));
+                }
+            };
+            this.client.socket.on('invalidPacket', onInvalid);
+        });
         this.client.socket.send({
             cmd: 'Set',
             default: defaultValue,
@@ -676,8 +772,15 @@ export class EnergyLinkStore extends EventTarget {
             want_reply: true,
             uuid: id,
         });
-        const [packet] = await this.client.socket.wait('setReply', (p) => p.uuid === id);
-        return packet;
+        try {
+            const [packet] = await Promise.race([
+                this.client.socket.wait('setReply', (p) => p.uuid === id),
+                refused,
+            ]);
+            return packet;
+        } finally {
+            this.client.socket.off('invalidPacket', onInvalid);
+        }
     }
 
     /** Buys one location. Kept for the console and for callers that buy a single row. */
@@ -797,6 +900,9 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     disconnect() {
+        this.hinted = new Set();
+        this.scouted = {};
+        this.scoutedNames = {};
         try {
             this.client.socket.disconnect();
         } catch {

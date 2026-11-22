@@ -192,15 +192,32 @@ buy**. Sold out pages can still be viewed through the page tabs.
 
 Instead of `Page 1 Location 1` every row of an **open** page shows the **category of the item** that
 sits there: `Progression`, `Useful`, `Trap` or `Filler`. The client asks for that by scouting on
-connect and again whenever a page opens; the location name and the item name are in the tooltip. In
-race seeds the server refuses to answer, then the row shows `Unknown`. Rows of a locked page show no
-category at all.
+connect and again whenever a page opens. In race seeds the server refuses to scout, so the category
+is taken from the slot's **hints** instead (`_read_hints_<team>_<slot>`), which exist in every seed.
+
+What a row may reveal is deliberately narrow:
+
+| Row | Category | Item name |
+| --- | --- | --- |
+| locked page | none (only `—`) | none, not even in the tooltip |
+| open page, not hinted | yes | none, tooltip carries the location name only |
+| open page, hinted | yes | yes, with a `Hinted` tag and the name in the tooltip |
+
+The item name is public only once somebody hinted the location. Scouting answers the same question
+but says nothing about what is already known to the players, so it is used for the category only.
+Locations of locked pages are not scouted at all, and their tooltip says nothing beyond "page N is
+locked".
 
 ## Purchase flow
 
 A purchase is a transaction, so no balance gets lost:
 
 1. Write to `EnergyLink{team}`: `add -price`, then `max 0`.
+
+The client uses only the storage operations `add` and `max`. Some patched servers refuse others (a
+0.6.3 build answers a `mul` with `AP_BLOCK_SET reason=operation_disabled`), so the Inflation Trap
+computes the burn from the current balance and sends it as `add -burn`. A refused write is reported
+in the console instead of being treated as done.
 2. The server answers with `original_value` and `value`. If the difference is exactly the price (or,
    for a multi buy, exactly the sum), the locations are reported with `client.check(...)`.
 3. On a mismatch (another client charged at the same time) the partial amount is booked back and the
@@ -286,7 +303,9 @@ npm run test:real             # needs a running AP server with the world
 npm run test:trapOnBuy        # a trap fires on purchase (a mock server is enough)
 npm run test:trapBothWays     # a trap on your own purchase and on arrival from another world
 npm run test:trapOtherPlayer  # purchase, item belongs to someone else: nothing happens here
+npm run test:restricted      # server refuses storage operations: traps still work, refusals are reported
 npm run test:unlock           # pages stay locked until their unlock item arrived
+npm run test:hints            # only hinted locations show the real item name
 npm run test:multiBuy         # buy several rows in one go
 npm run test:apworld          # parser and formatting of the joule amounts (Python)
 npm run test:dryrun           # 100 random seeds through ArchipelagoGenerate, every result checked

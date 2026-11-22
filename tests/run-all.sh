@@ -12,8 +12,8 @@ if ! curl -s -o /dev/null "${URL}/index.html"; then
 fi
 
 fail=0
-for suite in unit.test browser.test page-auto unlock multi-buy trap-on-buy trap-both-ways \
-             trap-other-player protocol-fallback cache-stale file-protocol; do
+for suite in unit.test browser.test page-auto unlock hints multi-buy trap-on-buy trap-both-ways \
+             trap-other-player trap-restricted-server protocol-fallback cache-stale file-protocol; do
     # trap-other-player needs the bought items to belong to another slot
     # Page 1 is always open, pages 2 and 3 wait for their unlock item.
     extra=""
@@ -21,6 +21,8 @@ for suite in unit.test browser.test page-auto unlock multi-buy trap-on-buy trap-
         # These suites do arithmetic on prices and the balance, so no trap may change either.
         multi-buy|page-auto|browser.test) extra="--no-traps" ;;
         trap-other-player) extra="--items-to-other 2" ;;
+        # A patched server that refuses some storage operations (field: AP_BLOCK_SET operation_disabled)
+        trap-restricted-server) extra="--block-ops mul,floor" ;;
     esac
     # shellcheck disable=SC2086
     node tests/mock-server.mjs --port "$PORT" --slot Tester --game "Test World" \

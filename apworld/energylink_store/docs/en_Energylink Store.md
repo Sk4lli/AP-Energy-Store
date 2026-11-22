@@ -88,7 +88,7 @@ beatable. A warning is logged when that happens.
 | `Progressive Store Unlock` | progression | the nth copy opens page n+1 (mode `progressive`) |
 | `Store Filler`   | filler     | nothing                                                     |
 | `Tax Trap`       | trap       | every price rises permanently by `tax_per_trap` percent     |
-| `Inflation Trap` | trap       | `inflation_per_trap` percent of the pool is burned          |
+| `Inflation Trap` | trap       | `inflation_per_trap` percent of the pool is burned (the client charges it with `add`, see the README) |
 
 Traps and McGuffins are placed by Archipelago like any other item, so they can end up anywhere in
 the multiworld. That is intentional: a trap always belongs to the store world that created it, no

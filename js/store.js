@@ -21,8 +21,10 @@ export class StoreModel extends EventTarget {
         this.unlocked = new Set();
         // location ids the player ticked for the next purchase
         this.selected = new Set();
-        // locationId -> item classification, filled by scouting
+        // locationId -> item classification, from scouting and from hints
         this.classification = {};
+        // locationId -> true when the location was hinted; only then is its item name public
+        this.hinted = new Set();
     }
 
     emit(type, detail) {
@@ -42,10 +44,11 @@ export class StoreModel extends EventTarget {
      * Rebuilds pages from the configuration and the location list of the slot.
      * locations: sorted array of location ids.
      */
-    setData({ config, locationIds, checked, taxSteps = 0, classification = null, unlocked = null }) {
+    setData({ config, locationIds, checked, taxSteps = 0, classification = null, unlocked = null, hinted = null }) {
         this.config = config;
         this.taxSteps = Math.max(0, Number(taxSteps) || 0);
         this.classification = classification ?? {};
+        this.hinted = new Set(hinted ?? []);
         if (unlocked) {
             this.setUnlocked(unlocked, { silent: true });
         }
@@ -97,9 +100,15 @@ export class StoreModel extends EventTarget {
         }
     }
 
-    /** Item classifications per location id, from scouting. Triggers a rebuild of the pages. */
-    setClassification(classification) {
+    /**
+     * Item classifications per location id, from scouting and hints.
+     * Triggers a rebuild of the pages.
+     */
+    setClassification(classification, hinted = null) {
         this.classification = classification ?? {};
+        if (hinted) {
+            this.hinted = new Set(hinted);
+        }
         this.pages = this._buildPages();
         this.emit('change', { reason: 'scouted' });
     }
@@ -110,6 +119,8 @@ export class StoreModel extends EventTarget {
         this.checked = new Set();
         this.selected = new Set();
         this.unlocked = new Set();
+        this.hinted = new Set();
+        this.classification = {};
         this.pages = [];
         this.page = 1;
         this.emit('change', { reason: 'clear' });
@@ -146,6 +157,8 @@ export class StoreModel extends EventTarget {
                     selected: this.selected.has(id),
                     // A locked page reveals nothing about what is in its locations.
                     kind: unlocked ? (this.classification[id] ?? 'unknown') : 'locked',
+                    // The real item name is public only for a hinted location of an open page.
+                    named: unlocked && this.hinted.has(id),
                 })),
                 bought: ids.filter((id) => this.checked.has(id)).length,
                 total: ids.length,

@@ -38,6 +38,13 @@ const NO_SLOT_DATA = Boolean(opt('no-slot-data', false));
 // With --no-traps the layout only has McGuffins and filler. Handy for tests that do arithmetic on
 // prices and the balance: a trap would change prices or the pool in the middle of the test.
 const NO_TRAPS = Boolean(opt('no-traps', false));
+// With --block-ops mul,floor the mock refuses those storage operations, like a patched server that
+// answers Set with AP_BLOCK_SET reason=operation_disabled. The client must then either avoid the
+// operation or report the failure, never pretend the write worked.
+const BLOCKED_OPS = String(opt('block-ops', '') || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value !== '');
 // Unlock mode: "page" (item "Store Page <n>" per page) or "progressive" (nth copy opens page n+1).
 const UNLOCK_MODE = String(opt('unlock', 'page'));
 // With --start-unlocked 2,3 these further pages are open from the start. Page 1 is always open,
@@ -82,6 +89,8 @@ const START_ITEMS = [
 ];
 
 const storage = new Map([[`EnergyLink0`, ENERGY]]);
+// Hints of this slot, in the format the server keeps under _read_hints_<team>_<slot>.
+const hints = [];
 const checked = new Set();
 const items = [];
 // What this slot really received. The server keeps that per slot, so items a bought location sends
@@ -239,7 +248,7 @@ wss.on('connection', (ws) => {
                 const keys = {};
                 for (const key of packet.keys ?? []) {
                     if (key.startsWith('_read_hints_')) {
-                        keys[key] = [];
+                        keys[key] = hints;
                     } else {
                         keys[key] = storage.has(key) ? storage.get(key) : null;
                     }
@@ -250,6 +259,22 @@ wss.on('connection', (ws) => {
             case 'SetNotify':
                 return;
             case 'Set': {
+                // A patched server refuses single operations outright.
+                const blocked = (packet.operations ?? [])
+                    .find((op) => BLOCKED_OPS.includes(op.operation));
+                if (blocked) {
+                    logLine(`BLOCK_SET key=${packet.key} op=${blocked.operation}`);
+                    if (!packet.want_reply) {
+                        return;
+                    }
+                    send([{
+                        cmd: 'InvalidPacket',
+                        type: 'cmd',
+                        text: `operation ${blocked.operation} disabled`,
+                        original_cmd: 'Set',
+                    }]);
+                    return;
+                }
                 // Like the real server: default only applies when the key does not exist yet.
                 let value = storage.has(packet.key) ? storage.get(packet.key) : (packet.default ?? 0);
                 const original = value;
@@ -363,6 +388,26 @@ wss.on('connection', (ws) => {
                 receivedByUs.push(entry);
                 logLine(`pushed trap for location ${id} (from slot ${entry.player})`);
                 send([{ cmd: 'ReceivedItems', index: START_ITEMS.length + receivedByUs.length - 1, items: [entry] }]);
+                return;
+            }
+            case 'DebugHint': {
+                // Test hook: hint one location, like a player spending hint points on it.
+                const locationId = Number(packet.location);
+                const itemId = itemForLocation(locationId);
+                hints.push({
+                    receiving_player: 1,
+                    finding_player: 1,
+                    location: locationId,
+                    item: itemId,
+                    found: false,
+                    entrance: '',
+                    item_flags: flagsForLocation(locationId),
+                    status: 0,
+                });
+                logLine(`hinted location ${locationId} (item ${itemId})`);
+                // The library reads the list from storage, so a client that asked before gets the
+                // new entry through this reply as well.
+                send([{ cmd: 'SetReply', key: `_read_hints_0_1`, value: hints }]);
                 return;
             }
             case 'DebugPushUnlock': {

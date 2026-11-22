@@ -16,11 +16,13 @@
     "test:protocol": "node tests/protocol-fallback.mjs",
     "test:pages": "node tests/page-auto.mjs",
     "test:unlock": "node tests/unlock.mjs",
+    "test:hints": "node tests/hints.mjs",
     "test:multiBuy": "node tests/multi-buy.mjs",
     "test:trapOnBuy": "node tests/trap-on-buy.mjs",
     "test:all": "sh tests/run-all.sh",
     "test:trapBothWays": "node tests/trap-both-ways.mjs",
     "test:trapOtherPlayer": "node tests/trap-other-player.mjs",
+    "test:restricted": "node tests/trap-restricted-server.mjs",
     "test:apworld": "python3 tests/test_joules.py",
     "test:dryrun": "python3 tools/dryrun.py --runs 100"
   },

@@ -157,6 +157,7 @@ function syncModel({ keepPage = false } = {}) {
         taxSteps: store.taxSteps ?? 0,
         classification: store.scouted,
         unlocked: store.unlockedPages,
+        hinted: [...(store.hinted ?? [])],
     });
     if (!keepPage) {
         model.showFirstOpenPage();
@@ -381,11 +382,12 @@ function renderLocations() {
         const kind = slot.kind ?? 'unknown';
         // A locked row shows no category at all: not the real one, not a placeholder.
         const label = locked ? '' : kindLabel(kind);
-        // A locked page shows neither the item name nor what kind of item it is.
+        // The tooltip follows the same rule: a locked page says nothing, and the item name only
+        // appears for a hinted location. Everything else falls back to the location itself.
         const tooltip = locked
             ? t('store.need.unlock', { page: page.number })
             : store.isConnected
-                ? `${store.locationName(slot.id)}${store.scoutedNames?.[slot.id] ? ` - ${store.scoutedNames[slot.id]}` : ''}`
+                ? (slot.named ? `${store.locationName(slot.id)} - ${store.scoutedNames?.[slot.id] ?? ''}`.trim() : store.locationName(slot.id))
                 : `Location ${slot.id}`;
         const selectable = !locked && !slot.bought;
         const state = slot.bought
@@ -409,9 +411,17 @@ function renderLocations() {
         }, [
             el('label', { class: 'location__pick' }, [tick]),
             el('span', { class: 'location__index', text: String(slot.index) }),
-            el('span', { class: 'location__name', title: tooltip }, label
-                ? [el('span', { class: `location__kind location__kind--${kind}`, text: label })]
-                : [el('span', { class: 'location__hidden', text: '—' })]),
+            el('span', { class: 'location__name', title: tooltip }, locked
+                ? [el('span', { class: 'location__hidden', text: '—' })]
+                : [
+                    el('span', { class: `location__kind location__kind--${kind}`, text: label }),
+                    ...(slot.named && store.scoutedNames?.[slot.id]
+                        ? [
+                            el('span', { class: 'location__item', text: store.scoutedNames[slot.id] }),
+                            el('span', { class: 'location__hinted', text: t('store.hinted'), title: t('store.hinted.hint') }),
+                        ]
+                        : []),
+                ]),
             el('span', {
                 class: 'location__price',
                 title: model.taxSteps > 0 ? t('store.price.taxed') : undefined,
@@ -564,9 +574,13 @@ function buildConsole() {
             return page.slots
                 .map((slot) => {
                     // a locked page tells nothing about its items
-                    const label = open ? kindLabel(slot.kind) : t('store.kind.hidden');
-                    const name = open ? ` (${store.locationName(slot.id)})` : '';
-                    return `${slot.index}. ${label}${name}`
+                    if (!open) {
+                        return `${slot.index}. ${t('store.kind.hidden')}`
+                            + ` - ${slot.bought ? t('store.bought') : formatEnergy(page.price, model.locale)}`;
+                    }
+                    const item = slot.named ? ` [${store.scoutedNames?.[slot.id] ?? '?'}]` : '';
+                    return `${slot.index}. ${kindLabel(slot.kind)}${item}`
+                        + ` (${store.locationName(slot.id)})`
                         + ` - ${slot.bought ? t('store.bought') : formatEnergy(page.price, model.locale)}`;
                 })
                 .join('\n');
@@ -761,7 +775,7 @@ function bindStoreEvents() {
     });
     store.addEventListener('scouted', (event) => {
         const detail = event.detail ?? {};
-        model.setClassification(detail.classification ?? {});
+        model.setClassification(detail.classification ?? {}, detail.hinted ?? null);
         consoleUi?.write(t('log.scouted', { count: detail.count ?? 0 }), 'info');
         render();
     });

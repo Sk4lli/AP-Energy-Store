@@ -443,6 +443,29 @@ body {
     opacity: 0.4;
 }
 
+/* Item name, only shown for a hinted location. */
+.location__item {
+    margin-left: 8px;
+    color: var(--text, #dbe4f5);
+    font-weight: 600;
+}
+
+.location__hinted {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border, #26314d);
+    color: var(--muted, #8b9ac0);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+/* A locked row shows nothing about its content. */
+.location__hidden {
+    color: var(--muted, #8b9ac0);
+}
+
 .location__index {
     width: 30px;
     height: 30px;
