@@ -45,6 +45,18 @@ const BLOCKED_OPS = String(opt('block-ops', '') || '')
     .split(',')
     .map((value) => value.trim())
     .filter((value) => value !== '');
+// With --swallow-sets N the first N Set packets are accepted (the storage really changes) but get
+// no reply at all. That is the case where a client marks work as done without proof.
+const SWALLOW_SETS = Number(opt('swallow-sets', 0)) || 0;
+let swallowed = 0;
+// With --ignore-sets N the first N Set packets are answered as if they worked, but the value is
+// not stored. That is the case where a client believes a burn it never did.
+const IGNORE_SETS = Number(opt('ignore-sets', 0)) || 0;
+let ignored = 0;
+// With --swallow-gets the server never answers a Get for the EnergyLink key. Like --swallow-sets,
+// this is the "no proof available" case: a client without a read timeout hangs on it forever and,
+// worse, blocks every later trap behind the pending burn.
+const SWALLOW_GETS = Boolean(opt('swallow-gets', false));
 // Unlock mode: "page" (item "Store Page <n>" per page) or "progressive" (nth copy opens page n+1).
 const UNLOCK_MODE = String(opt('unlock', 'page'));
 // With --start-unlocked 2,3 these further pages are open from the start. Page 1 is always open,
@@ -191,6 +203,7 @@ wss.on('connection', (ws) => {
                 const startItems = START_ITEMS;
                 send([{
                     cmd: 'Connected',
+                    version: { major: 0, minor: 6, build: 3 },
                     team: 0,
                     slot: 1,
                     players: [{ team: 0, slot: 1, alias: SLOT, name: SLOT }],
@@ -245,6 +258,11 @@ wss.on('connection', (ws) => {
                 return;
             }
             case 'Get': {
+                // A swallowed Get is the case "the client has no proof": no reply at all.
+                if (SWALLOW_GETS && (packet.keys ?? []).some((key) => key.startsWith('EnergyLink'))) {
+                    logLine(`swallowed Get for ${packet.keys?.join(',')}`);
+                    return;
+                }
                 const keys = {};
                 for (const key of packet.keys ?? []) {
                     if (key.startsWith('_read_hints_')) {
@@ -292,8 +310,26 @@ wss.on('connection', (ws) => {
                         default: break;
                     }
                 }
+                if (ignored < IGNORE_SETS) {
+                    ignored += 1;
+                    logLine(`ignored set ${packet.key} (${ignored}/${IGNORE_SETS}), replying anyway`);
+                    send([{
+                        cmd: 'SetReply',
+                        key: packet.key,
+                        value,
+                        original_value: original,
+                        slot: 1,
+                        uuid: packet.uuid,
+                    }]);
+                    return;
+                }
                 storage.set(packet.key, value);
                 logLine(`set ${packet.key}: ${original} -> ${value}`);
+                if (swallowed < SWALLOW_SETS) {
+                    swallowed += 1;
+                    logLine(`swallowed reply for ${packet.key} (${swallowed}/${SWALLOW_SETS})`);
+                    return;
+                }
                 const reply = {
                     cmd: 'SetReply',
                     key: packet.key,
@@ -388,6 +424,27 @@ wss.on('connection', (ws) => {
                 receivedByUs.push(entry);
                 logLine(`pushed trap for location ${id} (from slot ${entry.player})`);
                 send([{ cmd: 'ReceivedItems', index: START_ITEMS.length + receivedByUs.length - 1, items: [entry] }]);
+                return;
+            }
+            case 'DebugSend': {
+                // Like the real server's /send: the item arrives without a location (-1), so nothing
+                // tells two sends of the same item apart but the delivery itself.
+                const name = String(packet.item ?? 'Inflation Trap');
+                const itemId = Object.entries(unlockItemIds).find(([n]) => n === name)?.[1]
+                    ?? { 'McGuffin': 500, 'Store Filler': 501, 'Tax Trap': 502, 'Inflation Trap': 503 }[name];
+                if (!itemId) {
+                    logLine(`unknown item ${name}`);
+                    return;
+                }
+                const entry = { item: itemId, location: -1, player: 3, flags: 4 };
+                items.push(entry);
+                receivedByUs.push(entry);
+                logLine(`sent ${name} without a location`);
+                send([{
+                    cmd: 'ReceivedItems',
+                    index: START_ITEMS.length + receivedByUs.length - 1,
+                    items: [entry],
+                }]);
                 return;
             }
             case 'DebugHint': {

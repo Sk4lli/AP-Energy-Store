@@ -11,6 +11,26 @@
 import { Client, itemsHandlingFlags } from '../assets/vendor/archipelago.min.js';
 import { parseConfig } from './config.js';
 import { t } from './i18n.js';
+import { formatEnergy } from './util.js';
+import { CLIENT_VERSION } from './version.js';
+
+/** How long a Set request may take before it counts as unanswered (a server may swallow it). */
+export const SET_TIMEOUT_MS = 5000;
+
+/** How long a Get request may take before it counts as unanswered (a server may swallow it). */
+export const GET_TIMEOUT_MS = 5000;
+
+/**
+ * How long a failed burn waits before it is tried again.
+ *
+ * A trap that could not be charged stays pending. Without a pause the next item event would
+ * retry immediately, and a server that refuses the write would be flooded (field case: a build
+ * that blocks "add" got 1712 writes in 5 s).
+ */
+export const INFLATION_RETRY_MS = 15000;
+
+/** Protocol version this client announces in its Connect packet (the library default). */
+export const CLIENT_PROTOCOL_VERSION = [0, 6, 7];
 
 export const CONNECTION_STATE = {
     disconnected: 'disconnected',
@@ -55,9 +75,17 @@ export class EnergyLinkStore extends EventTarget {
         this.receivedItems = [];
         // Derived from the items this slot has received, so a reconnect recomputes the same numbers.
         this.trapEffects = { tax: 0, inflation: 0 };
-        // How many Inflation Traps already took their joules out of the pool. Persisted, because
-        // burning is a server write and must never happen twice for the same item.
-        this.inflationBurned = 0;
+        // Identities (loc:<id> / ord:<n>) of the Inflation Traps whose burn is done, persisted.
+        // Burning is a server write, so it must never happen twice -- and never be skipped because
+        // of a stale counter either. An identity is stable across a login replay, so the set cannot
+        // drift from the item list, and a trap that arrived while the page was closed is picked up
+        // afterwards instead of being forgotten.
+        this.inflationDone = new Set();
+        // true while the burn queue runs; items arriving in between add to the queue
+        this.inflationBusy = false;
+        // earliest time a failed burn may be retried, so a refusing server is not flooded
+        this.inflationRetryAt = 0;
+        this.inflationTimer = null;
         // locationId -> 'progression' | 'useful' | 'trap' | 'filler', filled by scouting
         this.scouted = {};
         this.scoutedNames = {};
@@ -127,6 +155,29 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
+     * What the room speaks, for diagnosis.
+     *
+     * A patched server can refuse parts of the protocol (some answer an EnergyLink write with
+     * "AP_BLOCK_SET reason=operation_disabled"). Knowing the server version and the protocol
+     * version this client announced makes that visible instead of guesswork.
+     */
+    get diagnostics() {
+        if (!this.isConnected) {
+            return { client: CLIENT_PROTOCOL_VERSION, server: null, energyKey: this.energyKey || null };
+        }
+        const version = this.client.room.serverVersion;
+        return {
+            client: CLIENT_PROTOCOL_VERSION.join('.'),
+            server: version && Number.isFinite(version.major)
+                ? `${version.major}.${version.minor}.${version.build}`
+                : 'unknown',
+            energyKey: this.energyKey || `EnergyLink${this.team}`,
+            team: this.team,
+            slot: this.slot,
+        };
+    }
+
+    /**
      * Counts the items of this slot and applies the traps among them.
      *
      * The received item list is the source of truth: the server sends the same list on every
@@ -134,8 +185,9 @@ export class EnergyLinkStore extends EventTarget {
      * changes nothing. Only what is *new* since the last look has an effect.
      *
      * Inflation is the exception that needs care, because burning joules is a write to the
-     * server. `this.inflationBurned` holds the amount it already burnt; the difference between the
-     * item count and that number is what still has to go, and it is burnt exactly once.
+     * server. `this.inflationDone` holds the identities whose burn is done; what is left of the
+     * list is burnt -- a trap that is merely in the inventory again (login replay) never fires
+     * twice, and a trap that arrived while the page was closed is picked up here.
      *
      * A trap therefore fires when its item arrives, whichever store the location belongs to:
      * the item of a location you buy is delivered to whoever it belongs to, including yourself.
@@ -155,8 +207,8 @@ export class EnergyLinkStore extends EventTarget {
             }
         }
 
-        const taxCount = this._trapLocations('Tax Trap').size;
-        const inflationCount = this._trapLocations('Inflation Trap').size;
+        const taxCount = this._trapIdentities('Tax Trap').size;
+        const inflationCount = this._trapIdentities('Inflation Trap').size;
         const previous = { ...this.trapEffects };
         this.trapEffects.tax = taxCount;
         this.trapEffects.inflation = inflationCount;
@@ -170,15 +222,10 @@ export class EnergyLinkStore extends EventTarget {
             });
         }
 
-        const pending = inflationCount - this.inflationBurned;
-        if (pending > 0) {
-            void this._applyInflationTrap(pending);
-        } else if (this.inflationBurned > inflationCount) {
-            // The server knows fewer traps than we burnt (regenerated room, different slot data).
-            // Trust the list and forget the surplus instead of keeping a debt.
-            this.inflationBurned = inflationCount;
-            this._saveTrapState();
-        }
+        // A trap is pending when its identity has not been burned yet. Comparing identities means
+        // neither a repeated delivery nor a new login can make a trap fire twice, and a trap whose
+        // write failed is picked up again instead of being remembered as done.
+        this._queueInflationBurn();
 
         this.emit('items', {
             mcguffins: this.countItem(this.config?.mcguffinItem ?? 'McGuffin'),
@@ -236,77 +283,194 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
-     * Burns a share of the pool. The share is applied with "mul", so it always hits the current
-     * amount even when another client added joules in the meantime.
+     * Queues the Inflation Traps that have not burnt yet, unless a burn is already running.
+     *
+     * Called from every items event and from the retry timer, never recursively: exactly one drain
+     * loop exists per connected session, so a refusing server cannot be flooded and a trap that
+     * arrives mid-burn is appended instead of starting a second burn.
      */
-    async _applyInflationTrap(count) {
+    _queueInflationBurn() {
+        if (this.inflationBusy) {
+            // the running drain loop looks at the list again after each trap
+            return;
+        }
         const share = Number(this.config?.inflationPerTrap ?? 0);
         if (!(share > 0) || !this.isConnected) {
             return;
         }
-        const key = this.energyKey || `EnergyLink${this.team}`;
-        const percent = Math.min(100, share * 100 * count);
-
-        // The burn is charged with "add", not with "mul". Some servers restrict which storage
-        // operations a client may use (a patched 0.6.3 answers a mul with
-        // "AP_BLOCK_SET reason=operation_disabled" and the trap would silently do nothing), while
-        // "add" is what every client needs for the EnergyLink. So the amount is computed here from
-        // the current balance and added as a negative number.
-        const before = this.energyKnown ? this.energy : await this.refreshEnergy(true);
-        const burn = Math.min(before, Math.round((before * share * count)));
-        if (!(burn > 0)) {
-            // Nothing left to burn, the trap is spent.
-            this.inflationBurned += count;
-            this._saveTrapState();
-            this.emit('trap', { kind: 'inflation', count, percent: Math.round(percent), burned: 0, energy: before });
+        const wait = this.inflationRetryAt - Date.now();
+        if (wait > 0) {
+            // A burn failed a moment ago and may still be in the server's queue: retrying now
+            // would burn twice or flood a refusing server. The timer below comes back to it.
+            if (!this.inflationTimer) {
+                this.inflationTimer = setTimeout(() => {
+                    this.inflationTimer = null;
+                    this._queueInflationBurn();
+                }, wait);
+            }
             return;
         }
-
-        // Count the traps as burnt before writing, so a second item event that arrives while the
-        // request is in flight cannot burn the same trap again.
-        this.inflationBurned += count;
-        this._saveTrapState();
-        try {
-            const packet = await this._setStorage(key, [
-                { operation: 'add', value: -burn },
-                { operation: 'max', value: 0 },
-            ]);
-            const previous = Math.round(Number(packet.original_value) || 0);
-            const value = Math.round(Number(packet.value) || 0);
-            this._setEnergy(value);
-            this.emit('trap', {
-                kind: 'inflation',
-                count,
-                percent: Math.round(percent),
-                burned: previous - value,
-                energy: value,
-            });
-        } catch (error) {
-            // Nothing was burnt, so let the next items event try again.
-            this.inflationBurned = Math.max(0, this.inflationBurned - count);
-            this._saveTrapState();
-            this.log('warn', t('log.trap.failed', { error: error.message }));
+        const pending = [...this._trapIdentities('Inflation Trap')]
+            .filter((identity) => !this.inflationDone.has(identity));
+        if (pending.length > 0) {
+            void this._drainInflationTraps(share);
         }
     }
 
     /**
-     * Distinct locations among the received items of the given trap.
+     * Burns every pending Inflation Trap, one at a time.
      *
-     * An item of the multiworld is unique per location: one location yields exactly one item, no
-     * matter how often the server sends the list. Counting locations instead of items keeps a
-     * trap from being applied twice if the same entry is delivered again, and makes a reconnect
-     * (which replays the whole list) harmless.
+     * One trap per write: the amount depends on the balance at that moment, so batching several
+     * traps into one "add" would hide a failed write behind the others.
      */
-    _trapLocations(name) {
-        const locations = new Set();
+    async _drainInflationTraps(share) {
+        this.inflationBusy = true;
+        try {
+            while (this.isConnected) {
+                const next = [...this._trapIdentities('Inflation Trap')]
+                    .find((identity) => !this.inflationDone.has(identity));
+                if (next === undefined) {
+                    return;
+                }
+                let burned = false;
+                try {
+                    burned = await this._burnInflation(next, share);
+                } catch (error) {
+                    // No balance to prove anything with (a swallowed Get). The trap stays pending
+                    // and is retried after the pause, never in a loop.
+                    this.log('error', t('log.trap.failed', { error: error.message }));
+                }
+                if (!burned) {
+                    // The trap stays pending and is retried later, not in a loop.
+                    this.inflationRetryAt = Date.now() + INFLATION_RETRY_MS;
+                    return;
+                }
+            }
+        } finally {
+            this.inflationBusy = false;
+            if (this.isConnected) {
+                const still = [...this._trapIdentities('Inflation Trap')]
+                    .some((identity) => !this.inflationDone.has(identity));
+                if (still) {
+                    this._queueInflationBurn();
+                }
+            }
+        }
+    }
+
+    /**
+     * Burns the share of one Inflation Trap. Resolves true when the burn is proven and booked.
+     *
+     * The burn is charged with "add", not with "mul": a patched server answers a "mul" with
+     * "AP_BLOCK_SET reason=operation_disabled" and the trap would silently do nothing, while "add"
+     * is what every client needs for the EnergyLink. So the amount is computed here from the
+     * current balance.
+     *
+     * A trap is only booked as burnt once the write is proven, and the proof is read back from the
+     * server: without that a lost or never answered request would mark the trap as done and it
+     * would never fire again (a trap that does nothing is worse than one that fires twice). One
+     * attempt per trap, no immediate second one -- a failed trap is retried after a pause, because
+     * the write may still be queued on the server.
+     */
+    async _burnInflation(identity, share) {
+        const key = this.energyKey || `EnergyLink${this.team}`;
+        const count = 1;
+        const percent = Math.min(100, share * 100 * count);
+
+        const before = await this._readStorage(key);
+        const burn = Math.min(before, Math.round(before * share * count));
+        if (!(burn > 0)) {
+            // Nothing left to burn, the trap is spent.
+            this._markInflationDone([identity]);
+            this.emit('trap', {
+                kind: 'inflation',
+                count,
+                percent: Math.round(percent),
+                burned: 0,
+                energy: before,
+                identity,
+            });
+            return true;
+        }
+
+        let answered = true;
+        try {
+            await this._setStorage(key, [
+                { operation: 'add', value: -burn },
+                { operation: 'max', value: 0 },
+            ]);
+        } catch (error) {
+            // No answer (or a refusal) says nothing about whether the server applied it, so the
+            // balance decides. A refusal is no exception to that: the server may have applied the
+            // operation and refused only the reply, and burning twice is worse than a late trap.
+            answered = false;
+            this.log('warn', t('log.trap.failed', { error: error.message }));
+        }
+
+        // Proof: the server has to show the burn, an answer alone is not enough. This is a real
+        // read, not the cached one, otherwise a swallowed write would look applied.
+        const value = await this._readStorage(key);
+        this._setEnergy(value);
+        if (value <= before - burn + 1) {
+            this._markInflationDone([identity]);
+            this.emit('trap', {
+                kind: 'inflation',
+                count,
+                percent: Math.round(percent),
+                burned: before - value,
+                energy: value,
+                identity,
+            });
+            return true;
+        }
+        if (answered) {
+            // The server answered but the balance did not move: report instead of silently
+            // burning again.
+            this.log('warn', t('log.trap.unconfirmed', {
+                expected: formatEnergy(burn, 'en-US').replace(',', ' '),
+                value: formatEnergy(value, 'en-US').replace(',', ' '),
+            }));
+        }
+        // Not booked: the trap stays pending. A failed write cannot leave the store believing the
+        // trap is spent, and the retry pause keeps a refusing server from being hammered.
+        this.log('error', t('log.trap.lost', { count }));
+        return false;
+    }
+
+    /**
+     * Identity of a received item, used to apply a trap exactly once.
+     *
+     * An item of the multiworld is unique per location: one location yields exactly one item, so
+     * the location id is the identity and a replayed list (a reconnect) cannot apply a trap twice.
+     *
+     * Items without a location exist: the server sends `/send` items and the start inventory with
+     * location -1. Those are identified by their ordinal among the items of the same name, which
+     * is stable because the received list only ever grows: the same trap keeps its ordinal across
+     * logins, a new one gets the next number and fires. A stamp per delivery would not do that --
+     * the login replay puts the whole list into one delivery, so every `/send` trap would share
+     * one identity: one would burn again on every reconnect and the next would never fire.
+     */
+    _itemIdentity(item, ordinal) {
+        const locationId = item.locationId ?? item.location ?? null;
+        if (locationId === null || Number(locationId) < 0) {
+            return `ord:${ordinal}`;
+        }
+        return `loc:${locationId}`;
+    }
+
+    /** Identities of the received items of the given trap. */
+    _trapIdentities(name) {
+        const identities = new Set();
+        let ordinal = 0;
         for (const item of this.receivedItems) {
             if ((item.name ?? '') !== name) {
                 continue;
             }
-            const locationId = item.locationId ?? item.location ?? null;
-            locations.add(locationId === null ? `item:${locations.size}` : `loc:${locationId}`);
+
+            identities.add(this._itemIdentity(item, ordinal));
+            ordinal += 1;
         }
-        return locations;
+        return identities;
     }
 
     countItem(name) {
@@ -340,24 +504,41 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     _loadTrapState() {
-        this.inflationBurned = 0;
+        this.inflationDone = new Set();
+        // true while the burn queue runs; items arriving in between add to the queue
+        this.inflationBusy = false;
+        // earliest time a failed burn may be retried, so a refusing server is not flooded
+        this.inflationRetryAt = 0;
+        if (this.inflationTimer) {
+            clearTimeout(this.inflationTimer);
+            this.inflationTimer = null;
+        }
         try {
             const raw = localStorage.getItem(this._trapStorageKey());
             if (!raw) {
                 return;
             }
             const data = JSON.parse(raw);
-            const burnt = Number(data.inflationBurned);
-            this.inflationBurned = Number.isFinite(burnt) && burnt > 0 ? Math.floor(burnt) : 0;
+            for (const identity of data.inflationDone ?? []) {
+                this.inflationDone.add(identity);
+            }
         } catch {
             // a broken entry only means a trap could fire twice, not worth failing over
         }
     }
 
+    /** Marks the burns that are done and remembers them. */
+    _markInflationDone(identities) {
+        for (const identity of identities) {
+            this.inflationDone.add(identity);
+        }
+        this._saveTrapState();
+    }
+
     _saveTrapState() {
         try {
             localStorage.setItem(this._trapStorageKey(), JSON.stringify({
-                inflationBurned: this.inflationBurned,
+                inflationDone: [...this.inflationDone],
             }));
         } catch {
             // storage may be blocked; the run still works, a reload just forgets the traps
@@ -549,6 +730,11 @@ export class EnergyLinkStore extends EventTarget {
         // Hints arrive through a stored data read that starts with the login, so give it a moment.
         setTimeout(() => this._readHints(), 1200);
 
+        this.log('info', t('log.versions', {
+            client: CLIENT_VERSION,
+            protocol: CLIENT_PROTOCOL_VERSION.join('.'),
+            server: this.diagnostics.server ?? '-',
+        }));
         this.emit('state', {
             state: this.state,
             slot: this.slot,
@@ -746,6 +932,43 @@ export class EnergyLinkStore extends EventTarget {
     }
 
     /**
+     * Reads a data storage key straight from the server.
+     *
+     * ``client.storage.fetch(key)`` answers from its local cache, which is exactly wrong when the
+     * value has to prove that a write arrived.
+     */
+    /**
+     * Reads a data storage key straight from the server.
+     *
+     * ``client.storage.fetch(key)`` answers from its local cache, which is exactly wrong when the
+     * value has to prove that a write arrived.
+     *
+     * The answer may never come (a patched or overloaded server swallows a Get). Without a timeout
+     * the caller would wait forever, and a pending burn would block every later trap.
+     */
+    async _readStorage(key) {
+        const id = uuid();
+        let timer = null;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(
+                () => reject(new Error(t('log.get.timeout'))),
+                GET_TIMEOUT_MS,
+            );
+        });
+        this.client.socket.send({ cmd: 'Get', keys: [key], uuid: id });
+        try {
+            const [packet] = await Promise.race([
+                this.client.socket.wait('retrieved', (p) => p.uuid === id),
+                timeout,
+            ]);
+            const value = packet?.keys?.[key];
+            return Number(value) || 0;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
      * Raw data storage write that returns the whole SetReply packet (value + original_value).
      *
      * A server that refuses the write (a patched server answers with
@@ -772,13 +995,22 @@ export class EnergyLinkStore extends EventTarget {
             want_reply: true,
             uuid: id,
         });
+        let timer = null;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(
+                () => reject(new Error(t('log.set.timeout'))),
+                SET_TIMEOUT_MS,
+            );
+        });
         try {
             const [packet] = await Promise.race([
                 this.client.socket.wait('setReply', (p) => p.uuid === id),
                 refused,
+                timeout,
             ]);
             return packet;
         } finally {
+            clearTimeout(timer);
             this.client.socket.off('invalidPacket', onInvalid);
         }
     }
@@ -903,6 +1135,15 @@ export class EnergyLinkStore extends EventTarget {
         this.hinted = new Set();
         this.scouted = {};
         this.scoutedNames = {};
+        this.inflationDone = new Set();
+        // true while the burn queue runs; items arriving in between add to the queue
+        this.inflationBusy = false;
+        // earliest time a failed burn may be retried, so a refusing server is not flooded
+        this.inflationRetryAt = 0;
+        if (this.inflationTimer) {
+            clearTimeout(this.inflationTimer);
+            this.inflationTimer = null;
+        }
         try {
             this.client.socket.disconnect();
         } catch {

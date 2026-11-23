@@ -26,6 +26,9 @@ status.title=Status
 status.connection=Verbindung
 status.disconnected=Getrennt
 status.energy=EnergyLink
+status.server=Server
+status.client=Client
+status.client.hint=Version dieses Clients im Browser ({version}). Bei Fehlern mit dieser Version neu laden.
 status.seed=Seed
 status.slot=Slot
 status.game=Spiel
@@ -64,9 +67,12 @@ console.title=Konsole
 console.placeholder=Befehl eingeben (help für Hilfe)
 console.send=Senden
 console.clear=Leeren
+console.version=Client-Version {version} (EnergyLink-Schreibvorgaenge: nur add und max)
+console.doctor.ops=Dieser Client schreibt nur add und max nach EnergyLink; ein blockierter Schreibvorgang wird gemeldet.
 console.welcome=Energylink Store Konsole bereit. "help" zeigt alle Befehle.
 console.unknown=Unbekannter Befehl: {cmd}. "help" zeigt alle Befehle.
 console.help=Verfügbare Befehle:\n  help                 Diese Hilfe\n  connect <server> <slot> [passwort]  Verbinden\n  disconnect           Verbindung trennen\n  status               Verbindungs- und Store-Status\n  balance              Aktuelles Joule-Guthaben\n  page <n>             Zu Seite n wechseln\n  pages                Alle Seiten mit Kaufstand\n  select <n|all|none>  Location n bzw. alle Zeilen der Seite auswaehlen
+  doctor               Client-, Server- und EnergyLink-Infos
   unlock               Welche Seiten offen und welche gesperrt sind
   buy [n]              Auswahl kaufen, mit n zusaetzlich Position n auswaehlen\n  locations            Locations der aktuellen Seite\n  lang <code>          Sprache wechseln (de_DE, en_US)\n  refresh              EnergyLink neu abfragen\n  clear                Konsole leeren
 console.need.connection=Für diesen Befehl wird eine Verbindung benötigt.
@@ -74,6 +80,7 @@ console.bad.args=Ungültige Argumente. Siehe "help".
 console.lang.unknown=Unbekannte Sprache: {code}. Verfügbar: {list}
 console.lang.changed=Sprache geändert auf {code}.
 
+log.versions=Client {client} (Protokoll {protocol}) mit Server {server} verbunden
 log.connected=Verbunden mit {url} als Slot "{slot}" (Spiel: {game}).
 log.disconnected=Verbindung getrennt.
 log.login.failed=Login fehlgeschlagen: {error}
@@ -110,7 +117,11 @@ log.items.unlock=Unlock erhalten: {item}
 log.items.trap=Trap erhalten: {trap}
 log.trap.tax=Steuer-Trap: alle Preise steigen dauerhaft um {percent}%, Faktor jetzt {factor}
 log.trap.inflation=Inflation-Trap: {percent}% des EnergyLinks verbrannt ({burned}), neuer Stand {value}
+log.set.timeout=Keine Antwort auf die EnergyLink-Buchung (Zeitueberschreitung)
+log.get.timeout=Keine Antwort auf das Lesen des EnergyLinks (Zeitueberschreitung)
 log.set.refused=Der Server hat die EnergyLink-Buchung abgelehnt (Operation gesperrt)
+log.trap.unconfirmed=Inflation-Trap: der Server zeigt den Abbrand nicht (erwartet {expected}, Stand {value})
+log.trap.lost=Inflation-Trap: {count} Trap(s) konnten nicht abgebucht werden und gelten als nicht gewirkt
 log.trap.failed=Trap konnte nicht angewendet werden: {error}
 console.traps=Steuer: {tax} (Preis-Faktor {factor}) · Inflation: {inflation}
 connect.error.invalidSlot=Slotname "{slot}" gibt es in diesem Raum nicht. Prüfe den Namen in deiner YAML und ob der Raum mit dieser YAML generiert wurde.

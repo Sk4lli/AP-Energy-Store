@@ -5,6 +5,8 @@ import { StoreModel } from './store.js';
 import { Console } from './console.js';
 import { LANGUAGES, applyTranslations, getLanguage, initI18n, setLanguage, t } from './i18n.js';
 import { el, formatEnergy, formatNumber, localeFromLang } from './util.js';
+import { CLIENT_VERSION } from './version.js';
+import { CLIENT_PROTOCOL_VERSION } from './ap.js';
 
 const store = new EnergyLinkStore();
 const model = new StoreModel(getLanguage());
@@ -24,6 +26,7 @@ const dom = {
     statSeed: document.getElementById('stat-seed'),
     statProgress: document.getElementById('stat-progress'),
     statGoal: document.getElementById('stat-goal'),
+    statClient: document.getElementById('stat-client'),
     storeBalance: document.getElementById('store-balance'),
     pageIndicator: document.getElementById('page-indicator'),
     pageSummary: document.getElementById('page-summary'),
@@ -331,6 +334,19 @@ function renderStatus() {
         dom.statGoal.className = 'stat-value';
     }
 
+    if (dom.statClient) {
+        const diagnostics = store.diagnostics;
+        dom.statClient.textContent = connected && diagnostics.server
+            ? `${CLIENT_VERSION} (AP ${diagnostics.server})`
+            : CLIENT_VERSION;
+        dom.statClient.title = t('status.client.hint', {
+            version: CLIENT_VERSION,
+            protocol: CLIENT_PROTOCOL_VERSION.join('.'),
+            server: diagnostics.server ?? '-',
+            key: diagnostics.energyKey ?? '-',
+        });
+    }
+
     dom.disconnectButton.disabled = !connected && store.state !== CONNECTION_STATE.connecting;
     dom.connectButton.disabled = connected;
 }
@@ -624,6 +640,16 @@ function buildConsole() {
             render();
             return t('store.selected', { count: model.selectedCount });
         },
+        doctor: () => {
+            const diagnostics = store.diagnostics;
+            return [
+                `${t('status.client')}: ${CLIENT_VERSION} (protocol ${CLIENT_PROTOCOL_VERSION.join('.')})`,
+                `${t('status.server')}: ${diagnostics.server ?? '-'}`,
+                `${t('status.slot')}: ${store.isConnected ? `${store.slotName} (#${store.slot}, team ${store.team})` : '-'}`,
+                `EnergyLink: ${diagnostics.energyKey ?? '-'} = ${store.energyKnown ? store.energy : '-'}`,
+                t('console.doctor.ops'),
+            ].join('\n');
+        },
         unlock: () => {
             if (!model.hasData) {
                 return t('error.no.store');
@@ -845,10 +871,11 @@ async function boot() {
     });
 
     consoleUi.write(t('console.welcome'), 'info');
+    consoleUi.write(t('console.version', { version: CLIENT_VERSION }), 'info');
     render();
 }
 
 void boot();
 
 // Exposed for tests and for use from the browser dev console.
-window.energylinkStore = { store, model, console: () => consoleUi, t };
+window.energylinkStore = { store, model, console: () => consoleUi, t, version: CLIENT_VERSION };

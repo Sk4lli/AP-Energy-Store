@@ -23,6 +23,12 @@
     "test:trapBothWays": "node tests/trap-both-ways.mjs",
     "test:trapOtherPlayer": "node tests/trap-other-player.mjs",
     "test:restricted": "node tests/trap-restricted-server.mjs",
+    "test:trapRobust": "node tests/trap-robust.mjs",
+    "test:trapSend": "node tests/trap-send.mjs",
+    "test:trapIdentity": "node tests/trap-identity.mjs",
+    "test:trapCatchup": "node tests/trap-catchup.mjs",
+    "test:trapBlockedAdd": "node tests/trap-blocked-add.mjs",
+    "test:trapGetTimeout": "node tests/trap-get-timeout.mjs",
     "test:apworld": "python3 tests/test_joules.py",
     "test:dryrun": "python3 tools/dryrun.py --runs 100"
   },

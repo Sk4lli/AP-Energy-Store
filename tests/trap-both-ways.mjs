@@ -38,7 +38,7 @@ const taxSlot = layout.find((s) => s.name === 'Tax Trap');
 const before1 = await p.evaluate(() => ({ energy: window.energylinkStore.store.energy, inflation: window.energylinkStore.store.trapEffects.inflation }));
 await p.evaluate((n) => window.energylinkStore.console().run(`buy ${n}`), inflationSlot.n);
 await p.waitForTimeout(1400);
-const after1 = await p.evaluate(() => ({ energy: window.energylinkStore.store.energy, inflation: window.energylinkStore.store.trapEffects.inflation, burnt: window.energylinkStore.store.inflationBurned }));
+const after1 = await p.evaluate(() => ({ energy: window.energylinkStore.store.energy, inflation: window.energylinkStore.store.trapEffects.inflation, burnt: window.energylinkStore.store.inflationDone.size }));
 console.log(`    own inflation buy: energy ${before1.energy}->${after1.energy}, inflation ${before1.inflation}->${after1.inflation}`);
 ck('own inflation trap fired', after1.inflation === before1.inflation + 1, String(after1.inflation));
 ck('pool was burned', after1.energy < before1.energy - 1000000, `${before1.energy} -> ${after1.energy}`);
@@ -49,7 +49,7 @@ ck('pool was burned', after1.energy < before1.energy - 1000000, `${before1.energ
 await p.evaluate((id) => window.energylinkStore.store._onItemsReceived(
     [{ name: 'Inflation Trap', locationId: id }], 99), inflationSlot.id);
 await p.waitForTimeout(400);
-const after2 = await p.evaluate(() => ({ inflation: window.energylinkStore.store.trapEffects.inflation, burnt: window.energylinkStore.store.inflationBurned }));
+const after2 = await p.evaluate(() => ({ inflation: window.energylinkStore.store.trapEffects.inflation, burnt: window.energylinkStore.store.inflationDone.size }));
 console.log(`    after a repeated delivery of the same location: inflation ${after1.inflation}->${after2.inflation}, burnt ${after1.burnt}->${after2.burnt}`);
 ck('same location is not counted twice', after2.inflation === after1.inflation, `${after1.inflation} -> ${after2.inflation}`);
 ck('the same trap is not burnt twice', after2.burnt === after1.burnt, `${after1.burnt} -> ${after2.burnt}`);

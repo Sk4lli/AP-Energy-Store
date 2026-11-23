@@ -39,7 +39,7 @@ const before = await p.evaluate(() => ({
     price: window.energylinkStore.model.priceOf(1),
     inflation: window.energylinkStore.store.trapEffects.inflation,
     tax: window.energylinkStore.store.trapEffects.tax,
-    burnt: window.energylinkStore.store.inflationBurned,
+    burnt: window.energylinkStore.store.inflationDone.size,
 }));
 
 // Buy the Inflation Trap; its item belongs to slot 2, so it never arrives here.
@@ -50,7 +50,7 @@ const afterInflation = await p.evaluate(() => ({
     price: window.energylinkStore.model.priceOf(1),
     inflation: window.energylinkStore.store.trapEffects.inflation,
     tax: window.energylinkStore.store.trapEffects.tax,
-    burnt: window.energylinkStore.store.inflationBurned,
+    burnt: window.energylinkStore.store.inflationDone.size,
     received: window.energylinkStore.store.receivedItems.map((i) => i.name),
 }));
 console.log(`    bought inflation trap of another player: energy ${before.energy}->${afterInflation.energy}, ` +

@@ -216,8 +216,34 @@ A purchase is a transaction, so no balance gets lost:
 
 The client uses only the storage operations `add` and `max`. Some patched servers refuse others (a
 0.6.3 build answers a `mul` with `AP_BLOCK_SET reason=operation_disabled`), so the Inflation Trap
-computes the burn from the current balance and sends it as `add -burn`. A refused write is reported
-in the console instead of being treated as done.
+computes the burn from the current balance and sends it as `add -burn`.
+
+The two traps work differently on purpose:
+
+| Trap | Effect | State |
+| --- | --- | --- |
+| Tax Trap | every price rises permanently by `tax_per_trap` | stacks by **count**; recomputed from the item list, so a reconnect changes nothing |
+| Inflation Trap | `inflation_per_trap` % of the pool burns | fires **once when the item arrives**; the inventory replay does not fire it again |
+
+An Inflation Trap is tracked in `localStorage` by an **identity**, not by a counter:
+
+- the identity is the location id (`loc:<id>`), so a replayed item list cannot burn it again. Items
+  without a location (the server sends `/send` items and the start inventory with location -1) are
+  identified by their **ordinal among the items of the same name** (`ord:0`, `ord:1`, …). The
+  received list only grows, so an ordinal is stable across logins: the same trap keeps its number
+  and a new `/send` trap gets the next one and fires. A stamp per delivery would not work here — the
+  login replay puts the whole list into one delivery, so every `/send` trap would share one identity,
+  one would burn again on every reconnect and the next would never fire,
+- a trap in the inventory is therefore not "new": nothing burns on a login replay,
+- a trap that arrived while the page was closed is **caught up**: it is in the replay, its identity is
+  not marked as burnt, so the next connect burns it once,
+- only one burn runs at a time: items that arrive in between join the queue, one trap per write,
+- a burn is only booked once the server really shows it: the balance is read back with `Get`
+  (not from the cache), and a leftover entry from an older session can never hide a real trap,
+- a trap whose write failed stays pending and is retried after a pause (`INFLATION_RETRY_MS`), not
+  immediately — a server that refuses the write would otherwise be flooded,
+- a write that is refused or never answered is reported in the console; `_setStorage` gives up
+  after 5 s and a read (`_readStorage`) after 5 s instead of waiting forever.
 2. The server answers with `original_value` and `value`. If the difference is exactly the price (or,
    for a multi buy, exactly the sum), the locations are reported with `client.check(...)`.
 3. On a mismatch (another client charged at the same time) the partial amount is booked back and the
@@ -304,6 +330,12 @@ npm run test:trapOnBuy        # a trap fires on purchase (a mock server is enoug
 npm run test:trapBothWays     # a trap on your own purchase and on arrival from another world
 npm run test:trapOtherPlayer  # purchase, item belongs to someone else: nothing happens here
 npm run test:restricted      # server refuses storage operations: traps still work, refusals are reported
+npm run test:trapRobust      # stale trap state and an unanswered write: burns once, never hangs
+npm run test:trapSend        # /send items carry no location: every send fires on its own
+npm run test:trapIdentity    # identity across a reconnect: inventory never burns, a new send does
+npm run test:trapCatchup     # a trap that arrived while the page was closed is caught up
+npm run test:trapBlockedAdd  # a server that refuses "add" is not flooded with retries
+npm run test:trapGetTimeout  # a server that never answers the Get does not hang the burn
 npm run test:unlock           # pages stay locked until their unlock item arrived
 npm run test:hints            # only hinted locations show the real item name
 npm run test:multiBuy         # buy several rows in one go
@@ -336,6 +368,22 @@ Bundled in `assets/vendor/`:
 
 - [archipelago.js](https://github.com/ThePhar/archipelago.js) 2.1.0, MIT — license text in
   `assets/vendor/archipelago.LICENSE`
+
+## Diagnosing a server that refuses writes
+
+A patched server can block parts of the protocol. In the field a 0.6.3 build answered an EnergyLink
+write with `AP_BLOCK_SET reason=operation_disabled op='mul'`. The client avoids that by only ever
+sending `add` and `max`, and it makes the versions visible so a stale page cannot be mistaken for a
+broken fix:
+
+- the status panel shows `Client` as `<client> (AP <server>)`,
+- the console prints a `Client <x> (protocol <y>) connected to server <z>` line on connect,
+- the console command `doctor` prints client version, announced protocol version, server version,
+  slot/team and the EnergyLink key in use.
+
+If a trap does nothing and the server log shows `AP_BLOCK_SET`, compare the `Client` line first: an
+old copy of the page in the browser is the usual cause, a hard reload (Ctrl+Shift+R) fixes it.
+`js/version.js` carries the build stamp; bump `CLIENT_VERSION` whenever `js/` changes.
 
 ## Notes
 

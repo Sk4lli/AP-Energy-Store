@@ -26,6 +26,9 @@ status.title=Status
 status.connection=Connection
 status.disconnected=Disconnected
 status.energy=EnergyLink
+status.server=Server
+status.client=Client
+status.client.hint=Version of this client in the browser ({version}). Reload when the fixes seem missing.
 status.seed=Seed
 status.slot=Slot
 status.game=Game
@@ -64,9 +67,12 @@ console.title=Console
 console.placeholder=Enter a command (help for help)
 console.send=Send
 console.clear=Clear
+console.version=Client version {version} (EnergyLink writes: add and max only)
+console.doctor.ops=This client only writes add and max to EnergyLink; a refused write is reported.
 console.welcome=Energylink Store console ready. "help" lists all commands.
 console.unknown=Unknown command: {cmd}. "help" lists all commands.
 console.help=Available commands:\n  help                 This help\n  connect <server> <slot> [password]  Connect\n  disconnect           Disconnect\n  status               Connection and store status\n  balance              Current joule balance\n  page <n>             Switch to page n\n  pages                All pages with purchase state\n  select <n|all|none>  Select location n, or every row of the page
+  doctor               client, server and EnergyLink details
   unlock               Which pages are open and which are locked
   buy [n]              Buy the selection, with n also tick position n\n  locations            Locations of the current page\n  lang <code>          Switch language (de_DE, en_US)\n  refresh              Re-read EnergyLink\n  clear                Clear the console
 console.need.connection=This command requires a connection.
@@ -74,6 +80,7 @@ console.bad.args=Invalid arguments. See "help".
 console.lang.unknown=Unknown language: {code}. Available: {list}
 console.lang.changed=Language changed to {code}.
 
+log.versions=Client {client} (protocol {protocol}) connected to server {server}
 log.connected=Connected to {url} as slot "{slot}" (game: {game}).
 log.disconnected=Disconnected.
 log.login.failed=Login failed: {error}
@@ -110,7 +117,11 @@ log.items.unlock=Unlock received: {item}
 log.items.trap=Trap received: {trap}
 log.trap.tax=Tax trap: all prices rise permanently by {percent}%, factor now {factor}
 log.trap.inflation=Inflation trap: burned {percent}% of the EnergyLink ({burned}), new balance {value}
+log.set.timeout=No answer to the EnergyLink write (timeout)
+log.get.timeout=No answer to reading the EnergyLink (timeout)
 log.set.refused=The server refused the EnergyLink write (operation disabled)
+log.trap.unconfirmed=Inflation trap: the server does not show the burn (expected {expected}, balance {value})
+log.trap.lost=Inflation trap: {count} trap(s) could not be charged and count as not applied
 log.trap.failed=Could not apply trap: {error}
 console.traps=tax: {tax} (price factor {factor}) · inflation: {inflation}
 connect.error.invalidSlot=Slot name "{slot}" does not exist in this room. Check the name in your YAML and that the room was generated from it.
